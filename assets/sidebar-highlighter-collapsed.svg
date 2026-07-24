@@ -1,0 +1,19 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 103.696 107.696" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Highlighter-collapsed">
+<g id="Highlighter" filter="url(#filter0_d_0_4)">
+<path d="M26.8478 71.7609H54.8437H60.8478C69.6844 71.7609 76.8478 64.5974 76.8478 55.7609V33.7609C76.8478 24.9243 69.6844 17.7609 60.8478 17.7609H26.8478V71.7609Z" fill="#FFF4EA"/>
+</g>
+</g>
+<defs>
+<filter id="filter0_d_0_4" x="0" y="0" width="103.696" height="107.696" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="9.08696"/>
+<feGaussianBlur stdDeviation="13.4239"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 0.627451 0 0 0 0 0.27451 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_4"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_4" result="shape"/>
+</filter>
+</defs>
+</svg>

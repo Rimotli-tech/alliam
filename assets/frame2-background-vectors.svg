@@ -1,0 +1,52 @@
+<svg width="1920" height="726" viewBox="0 0 1920 726" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="1920" height="726" fill="#1E1E1E"/>
+<g id="Design Alliam Web Pages">
+<rect width="1920" height="1686" fill="#F7F3ED"/>
+<g id="Group 1">
+<g id="LandingPage" clip-path="url(#clip0_0_1)">
+<g id="Placeholder for LandingPage:margin">
+<g id="Placeholder for LandingPage">
+<g id="Background Vectors">
+<path id="Rectangle 1" d="M6.10352e-05 -1080H1920V-256C1920 -256 1221.27 -579.469 911.659 -376.5C418.954 -53.5 6.10352e-05 -256 6.10352e-05 -256V-1080Z" fill="#FF6845"/>
+<g id="Sphere" filter="url(#filter1_d_0_1)">
+<rect x="-80.0775" y="-237" width="369" height="369" rx="137" transform="rotate(45 -80.0775 -237)" fill="#FF7656"/>
+</g>
+<g id="Rectangle 4" filter="url(#filter2_d_0_1)">
+<path d="M1058.5 -1193.5C1183.5 -1148.67 1319.03 -897.953 1557.5 -1024C1942.5 -1227.5 1990.49 -899.789 1963.5 -603.001C1936.52 -306.212 1259 -910.501 923.001 -616.5C587.002 -322.5 616.469 286.046 211.001 183.499C27.7058 137.142 -145.102 -106.848 -198.014 -187.555C-208.972 -204.27 -212.813 -224.211 -209.278 -243.883C-194.963 -323.541 -151.504 -542.711 -82.5002 -694C169.5 -1246.5 543.219 -1378.32 1058.5 -1193.5Z" fill="url(#paint0_radial_0_1)"/>
+</g>
+</g>
+</g>
+</g>
+</g>
+</g>
+</g>
+<defs>
+<filter id="filter1_d_0_1" x="-358" y="-237" width="607.845" height="623.845" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dx="26" dy="59"/>
+<feGaussianBlur stdDeviation="21.5"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0.972549 0 0 0 0 0.372549 0 0 0 0 0.180392 0 0 0 0.5 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape"/>
+</filter>
+<filter id="filter2_d_0_1" x="-252.652" y="-1271.99" width="2276.46" height="1576.1" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dx="6" dy="61"/>
+<feGaussianBlur stdDeviation="24.05"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0.972549 0 0 0 0 0.466667 0 0 0 0 0.301961 0 0 0 0.5 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape"/>
+</filter>
+<radialGradient id="paint0_radial_0_1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(799.5 -316) rotate(-116.184) scale(1009.61 1306.87)">
+<stop offset="0.25" stop-color="#FEAF24"/>
+<stop offset="0.764423" stop-color="#FC7651"/>
+</radialGradient>
+<clipPath id="clip0_0_1">
+<rect width="1920" height="2765.59" fill="white"/>
+</clipPath>
+</defs>
+</svg>

@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+*.secrets
+
+# Firebase local state, credentials, and emulators
+.firebase/
+.firebaserc.local
+firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+firebase-deploy-wrapper.js
+*-firebase-adminsdk-*.json
+service-account*.json
+serviceAccount*.json
+google-application-credentials*.json
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Generated output and caches
+dist/
+build/
+coverage/
+.cache/
+.tmp/
+tmp/
+*.log
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
