@@ -1,0 +1,16 @@
+{
+  "nextProcessingBatch": [
+    {
+      "word": "rhythm",
+      "assetAction": "preserve-current-until-next-batch",
+      "issueType": "intonation",
+      "reviewNote": "Weakest of the 0.70-speed batch. The voice appears to place syllabic stress on both 'rhy' and 'thm'; aim for a natural single-syllable delivery.",
+      "currentSettings": {
+        "speed": 0.7,
+        "stability": 1,
+        "pronunciationMode": "natural",
+        "explicitPhonemes": false
+      }
+    }
+  ]
+}

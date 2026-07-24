@@ -93,7 +93,7 @@
   };
 
   let state = loadState();
-  let runtime = { authMode:"signin", authBusy:false, audioStatus:"idle", audioError:"", alphabetReady:0, onboardingStep:0, onboarding:{role:"student",nickname:"",guardianName:"",learnerName:"",grade:"Grade 1",country:"Nigeria",school:"",avatar:"A"}, trainingSetup:{mode:"Hear & Spell",level:"Foundation",count:5,assistance:"Guided"}, session:null, competition:null, modal:null, tab:null, mobileMenu:false, profileMenu:false, viewedLearnerId:null, live:{player:null,leaderboard:[],friendRequests:[],friends:[],teams:[],events:[],invitations:[]}, liveUnsubscribe:null, matchUnsubscribe:null, sidebarCollapsed:true };
+  let runtime = { authMode:"signin", authBusy:false, audioStatus:"idle", audioError:"", alphabetReady:0, onboardingStep:0, onboarding:{role:"student",nickname:"",guardianName:"",learnerName:"",schoolName:"",adminName:"",grade:"Grade 1",country:"Nigeria",school:"",avatar:"A"}, trainingSetup:{mode:"Hear & Spell",level:"Foundation",count:5,assistance:"Guided"}, session:null, competition:null, modal:null, tab:null, mobileMenu:false, profileMenu:false, viewedLearnerId:null, live:{player:null,leaderboard:[],friendRequests:[],friends:[],teams:[],events:[],invitations:[]}, liveUnsubscribe:null, matchUnsubscribe:null, sidebarCollapsed:true };
 
   const routes = {
     home:"Home", train:"Train", compete:"Compete", rankings:"Rankings", social:"Friends & teams", profile:"Profile",
@@ -137,10 +137,13 @@
     return migrated;
   }
   function isParentAccount(){return state.role==='parent'||Boolean(state.accountOwner);}
+  function isSchoolAccount(){return state.role==='school'||Boolean(state.schoolAccount);}
+  function accountLandingRoute(){return isParentAccount()?'parent':isSchoolAccount()?'school':'home';}
   function loadState(){ try { const saved=localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) || "{}"; const loaded=migrateBrandState({ ...defaultState, ...JSON.parse(saved) }); if(!localStorage.getItem(STORAGE_KEY)&&saved!=="{}")localStorage.setItem(STORAGE_KEY,JSON.stringify(loaded)); return loaded; } catch { return structuredClone(defaultState); } }
   function saveState(){
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    if(services.firebase.configured) services.firebase.save('app-state',state).catch(error=>console.warn('Firebase sync failed:',error.message));
+    if(services.firebase.configured)return services.firebase.save('app-state',state).catch(error=>console.warn('Firebase sync failed:',error.message));
+    return Promise.resolve();
   }
   function profile(){
     const stored=state.profiles.find(p => p.id === state.activeProfileId) || state.profiles[0] || {id:"guest",nickname:"Speller",grade:"Grade 1",country:"Nigeria",avatar:"S",school:""};
@@ -151,6 +154,10 @@
     return {...stored,nickname,avatar:(nickname[0]||stored.avatar||'S').toUpperCase()};
   }
   function accountIdentity(){
+    if(isSchoolAccount()){
+      const school=state.schoolAccount||{},name=school.adminName||services.firebase.user?.displayName||school.name||'School administrator';
+      return {nickname:name,avatar:initials(name),grade:school.name||'School account',country:school.country||'Nigeria'};
+    }
     if(!isParentAccount())return profile();
     const user=services.firebase.user,owner=state.accountOwner||{};
     const name=(owner.name||user?.displayName||user?.email?.split('@')[0]||'Parent').trim();
@@ -417,15 +424,22 @@
 
   function renderOnboarding(){
     const o=runtime.onboarding;
-    const roleStep=`<h2>Choose how you’ll use Alliam</h2><p>This determines the experience we prepare.</p><div class="role-grid">${[["student","user","Student"],["parent","shield","Parent"],["coach","school","Coach or school"]].map(([value,ico,label])=>`<button class="role-option ${o.role===value?'active':''}" data-onboard-role="${value}"><span>${icon(ico)}</span><strong>${label}</strong></button>`).join("")}</div>`;
+    const roleStep=`<h2>Choose how you’ll use Alliam</h2><p>This determines the experience we prepare.</p><div class="role-grid">${[["student","user","Student"],["parent","shield","Parent"],["school","school","School"]].map(([value,ico,label])=>`<button class="role-option ${o.role===value?'active':''}" data-onboard-role="${value}"><span>${icon(ico)}</span><strong>${label}</strong></button>`).join("")}</div>`;
     const learnerStep=(heading='Create the learner profile')=>`<h2>${heading}</h2><p>Only the essentials for fair, age-appropriate competition.</p><div class="form"><div class="field"><label for="obName">First name or competition nickname</label><input class="input" id="obName" value="${o.role==='parent'?o.learnerName:o.nickname}" placeholder="e.g. Ada" /></div><div class="grid grid-2"><div class="field"><label for="obGrade">Grade</label><select class="select" id="obGrade">${[1,2,3,4,5,6,7,8].map(n=>`<option ${o.grade===`Grade ${n}`?'selected':''}>Grade ${n}</option>`).join("")}</select></div><div class="field"><label for="obCountry">Country</label><select class="select" id="obCountry">${['Nigeria','Ghana','Kenya','South Africa','Other'].map(country=>`<option ${o.country===country?'selected':''}>${country}</option>`).join('')}</select></div></div><div class="field"><label for="obSchool">School (optional)</label><input class="input" id="obSchool" value="${o.school}" placeholder="Your school" /></div><div class="field"><label>Profile initial</label><div class="avatar-grid">${["A","S","K","Z","T"].map(x=>`<button class="avatar-choice ${o.avatar===x?'active':''}" data-avatar="${x}">${x}</button>`).join("")}</div></div></div>`;
     const parentStep=`<h2>Create the parent profile</h2><p>This adult account manages learners, permissions, and progress.</p><div class="form"><div class="field"><label for="obGuardianName">Parent or guardian name</label><input class="input" id="obGuardianName" value="${o.guardianName||o.nickname}" placeholder="Your name" /></div><div class="field"><label for="obCountry">Country</label><select class="select" id="obCountry">${['Nigeria','Ghana','Kenya','South Africa','Other'].map(country=>`<option ${o.country===country?'selected':''}>${country}</option>`).join('')}</select></div></div>`;
+    const schoolStep=`<h2>Set up your school</h2><p>Create the institution account used for rosters, teams, fixtures, and competitions.</p><div class="form"><div class="field"><label for="obSchoolName">School or organisation name</label><input class="input" id="obSchoolName" value="${o.schoolName||''}" placeholder="e.g. Emerald Primary School" /></div><div class="field"><label for="obAdminName">Administrator or coach name</label><input class="input" id="obAdminName" value="${o.adminName||o.nickname||''}" placeholder="Your name" /></div><div class="field"><label for="obCountry">Country</label><select class="select" id="obCountry">${['Nigeria','Ghana','Kenya','South Africa','Other'].map(country=>`<option ${o.country===country?'selected':''}>${country}</option>`).join('')}</select></div></div>`;
     const soundStep=`<h2>Check your sound</h2><p>Alliam needs clear playback and a microphone for voice-first spelling.</p><div class="card"><div class="list-row"><div class="card-icon">${icon('volume')}</div><div class="list-main"><strong>Speaker</strong><small>Hear the sample word clearly.</small></div><button class="btn btn-sm" data-action="speaker-test">Test</button></div><div class="list-row"><div class="card-icon">${icon('mic')}</div><div class="list-main"><strong>Microphone</strong><small>${services.speech.configured?'Say a letter to verify recognition.':'Speech service is not connected.'}</small></div><button class="btn btn-sm" data-action="mic-test" ${services.speech.configured?'':'disabled'}>${services.speech.configured?'Test':'Unavailable'}</button></div></div><div class="switch-row"><div><strong>Parent or guardian consent</strong><div class="muted">Required for voice features on a child account.</div></div><label class="switch"><input id="consentCheck" type="checkbox" checked/><span></span></label></div>`;
     const learnerName=o.role==='parent'?o.learnerName:o.nickname;
     const readyStep=o.role==='parent'
       ? `<h2>Your family is ready</h2><p>You can add and manage more learners from the Parent dashboard at any time.</p><div class="card"><div class="list-row"><span class="avatar">${o.avatar}</span><div class="list-main"><strong>${learnerName||'First learner'}</strong><small>${o.grade} · ${o.country}</small></div></div><div class="list-row"><span class="card-icon">${icon('plus')}</span><div class="list-main"><strong>More learner profiles</strong><small>Add siblings or other learners after setup.</small></div></div></div>`
+      : o.role==='school'
+      ? `<h2>Your school hub is ready</h2><p>Add learners and staff after entering the hub, then organise teams and fixtures.</p><div class="card"><div class="list-row"><span class="avatar">${initials(o.schoolName||'School')}</span><div class="list-main"><strong>${o.schoolName||'Your school'}</strong><small>${o.country} · Managed by ${o.adminName||'Administrator'}</small></div></div><div class="list-row"><span class="card-icon">${icon('users')}</span><div class="list-main"><strong>Build your roster</strong><small>Learner profiles belong inside the school account—not to the administrator.</small></div></div></div>`
       : `<h2>You’re ready to spell</h2><p>Your journey starts with Foundation words and adapts as you compete.</p><div class="card"><div class="list-row"><span class="avatar">${o.avatar}</span><div class="list-main"><strong>${learnerName||'New speller'}</strong><small>${o.grade} · ${o.country}</small></div></div><div class="progress-label"><span>Starting level</span><strong>Foundation</strong></div><div class="progress"><span style="width:20%"></span></div></div>`;
-    const steps=o.role==='parent'?[roleStep,parentStep,learnerStep('Add the first learner'),soundStep,readyStep]:[roleStep,learnerStep(),soundStep,readyStep];
+    const steps=o.role==='parent'
+      ? [roleStep,parentStep,learnerStep('Add the first learner'),soundStep,readyStep]
+      : o.role==='school'
+      ? [roleStep,schoolStep,readyStep]
+      : [roleStep,learnerStep(),soundStep,readyStep];
     return `<div class="onboarding"><aside class="onboarding-side"><div class="brand"><b class="brand-mark">A</b><span>Alliam</span></div><h1>Train.<br/>Compete.<br/>Rise.</h1><p>Serious voice-first spelling for learners, schools, and tournaments.</p><div class="onboarding-dots">${steps.map((_,i)=>`<i class="${i===runtime.onboardingStep?'active':''}"></i>`).join("")}</div></aside><main class="onboarding-main"><section class="onboarding-form">${steps[runtime.onboardingStep]}<div class="form-actions"><button class="btn ${runtime.onboardingStep===0?'hidden':''}" data-action="onboard-back">Back</button><button class="btn btn-primary" data-action="onboard-next">${runtime.onboardingStep===steps.length-1?'Enter Alliam':'Continue'}</button></div><button class="btn btn-ghost" data-action="load-demo">Explore with a demo profile</button></section></main></div>`;
   }
 
@@ -1108,7 +1122,7 @@
 
   function renderParent(){ const p=profile();return `<main class="page">${pageHead('Adult supervision','Parent dashboard','Manage learner access, safety, and progress.',`<button class="btn btn-primary" data-action="add-learner">${icon('plus')} Add learner</button>`)}<div class="grid grid-3"><div class="card stat"><small>Learners</small><div class="value">${state.profiles.length}</div></div><div class="card stat"><small>Matches this week</small><div class="value">${state.matches.length}</div></div><div class="card stat"><small>Words reviewed</small><div class="value">${state.trainingSessions*5}</div></div></div><div class="grid grid-2" style="margin-top:18px"><section class="card"><h3>Learner profiles</h3>${state.profiles.map(x=>`<div class="list-row ${x.id===state.activeProfileId?'active-learner':''}"><span class="avatar">${x.avatar}</span><div class="list-main"><strong>${x.nickname}</strong><small>${x.grade} · Rating ${state.rank}</small></div><button class="btn btn-sm" data-action="view-learner" data-view-learner-id="${x.id}">View learner</button></div>`).join('')}</section><section class="card"><h3>Permissions for ${p.nickname}</h3>${toggle('parentCompetition','Online competition',true)}${toggle('parentFriends','Friend requests',state.settings.friendRequests)}${toggle('parentAudio','Audio retention',state.settings.audioRetention)}</section></div></main>`; }
   function renderSchool(){ return `<main class="page">${pageHead('Organized competition','School hub','Rosters, teams, word packs, fixtures, and results.',`<button class="btn btn-primary" data-action="create-event">${icon('plus')} Create event</button>`)}<div class="grid grid-4"><div class="card stat"><small>Students</small><div class="value">24</div></div><div class="card stat"><small>Teams</small><div class="value">4</div></div><div class="card stat"><small>Fixtures</small><div class="value">3</div></div><div class="card stat"><small>School rank</small><div class="value">#18</div></div></div><div class="grid grid-2" style="margin-top:18px"><section class="card"><h3>Upcoming fixtures</h3><div class="list-row"><span class="avatar">EP</span><div class="list-main"><strong>Emerald vs Blue House</strong><small>Friday · 12:30 · 6v6</small></div><span class="badge live">Scheduled</span></div><div class="list-row"><span class="avatar">DP</span><div class="list-main"><strong>District qualifier</strong><small>Saturday · Online bracket</small></div><span class="badge">Check-in soon</span></div></section><section class="card"><h3>Team roster</h3>${['Ada M.','Tobi A.','Maya E.','David O.','Zuri N.','Kwame A.'].map((n,i)=>`<div class="list-row"><span class="rank-num">${i+1}</span><div class="list-main"><strong>${n}</strong><small>${i<3?'Starter':'Reserve'}</small></div><span class="badge rank">${1500-i*23}</span></div>`).join('')}</section></div></main>`; }
-  function renderAdmin(){ const audioReady=WORDS.filter(word=>word.audio?.normal).length;return `<main class="page">${pageHead('Internal operations','Content & administration','Manage word packs, generated voice assets, and match operations.',`<input id="manualAlphabetFiles" type="file" accept=".mp3,audio/mpeg" multiple hidden><label class="btn ${runtime.audioBusy?'disabled':''}" for="manualAlphabetFiles">${icon('upload')} Use recorded alphabet</label><button class="btn" data-action="test-pronunciations" ${runtime.audioBusy?'disabled':''}>${icon('volume')} Retry Imagine & Enormous</button><button class="btn" data-action="regenerate-primary-pronunciations" ${runtime.audioBusy?'disabled':''}>${icon('volume')} Apply approved voice to 60 words</button><button class="btn" data-action="generate-alphabet" ${runtime.audioBusy?'disabled':''}>${icon('volume')} Generate alphabet</button><button class="btn" data-action="generate-audio" ${runtime.audioBusy?'disabled':''}>${runtime.audioBusy?'Processing audio…':`${icon('volume')} Generate word pack`}</button><button class="btn btn-primary" data-action="add-word">${icon('plus')} Add word</button>`)}${runtime.audioMessage?`<div class="card"><strong>Audio pipeline</strong><p>${runtime.audioMessage}</p></div>`:''}<div class="grid grid-4"><div class="card stat"><small>Words</small><div class="value">${WORDS.length}</div></div><div class="card stat"><small>Word audio</small><div class="value">${audioReady}</div><span class="badge ${audioReady===WORDS.length?'good':'rank'}">${audioReady===WORDS.length?'Ready':'Generation needed'}</span></div><div class="card stat"><small>Alphabet audio</small><div class="value">${runtime.alphabetReady||0}/26</div><span class="badge ${(runtime.alphabetReady||0)===26?'good':'rank'}">${(runtime.alphabetReady||0)===26?'Ready':'Generation needed'}</span></div><div class="card stat"><small>Review holds</small><div class="value">0</div></div></div><div class="tabs" style="margin-top:25px"><button class="active">Word library</button><button>Audio pipeline</button><button>Releases</button><button>Match operations</button><button>Moderation</button></div><div class="card table-wrap"><table class="table"><thead><tr><th>Word</th><th>Level</th><th>Origin</th><th>Audio</th><th class="right">Action</th></tr></thead><tbody>${WORDS.map(w=>`<tr><td><strong>${w.word}</strong></td><td>${w.level}</td><td>${w.origin}</td><td><span class="badge ${w.audio?.normal?'good':'rank'}">${w.audio?.normal?'Generated':'Needs generation'}</span></td><td class="right"><button class="btn btn-sm" data-action="edit-word" data-word="${w.word}">Edit</button></td></tr>`).join('')}</tbody></table></div></main>`; }
+  function renderAdmin(){ const audioReady=WORDS.filter(word=>word.audio?.normal).length;return `<main class="page">${pageHead('Internal operations','Content & administration','Manage word packs, generated voice assets, and match operations.',`<button class="btn btn-primary" data-action="add-word">${icon('plus')} Add word</button>`)}${runtime.audioMessage?`<div class="card"><strong>Audio pipeline</strong><p>${runtime.audioMessage}</p></div>`:''}<div class="grid grid-4"><div class="card stat"><small>Words</small><div class="value">${WORDS.length}</div></div><div class="card stat"><small>Word audio</small><div class="value">${audioReady}</div><span class="badge ${audioReady===WORDS.length?'good':'rank'}">${audioReady===WORDS.length?'Ready':'Generation needed'}</span></div><div class="card stat"><small>Alphabet audio</small><div class="value">${runtime.alphabetReady||0}/26</div><span class="badge ${(runtime.alphabetReady||0)===26?'good':'rank'}">${(runtime.alphabetReady||0)===26?'Ready':'Generation needed'}</span></div><div class="card stat"><small>Review holds</small><div class="value">0</div></div></div><div class="tabs" style="margin-top:25px"><button class="active">Word library</button><button>Audio pipeline</button><button>Releases</button><button>Match operations</button><button>Moderation</button></div><div class="card table-wrap"><table class="table"><thead><tr><th>Word</th><th>Level</th><th>Origin</th><th>Audio</th><th class="right">Action</th></tr></thead><tbody>${WORDS.map(w=>`<tr><td><strong>${w.word}</strong></td><td>${w.level}</td><td>${w.origin}</td><td><span class="badge ${w.audio?.normal?'good':'rank'}">${w.audio?.normal?'Generated':'Needs generation'}</span></td><td class="right"><button class="btn btn-sm" data-action="play-admin-word" data-word="${w.word}">${icon('volume')} Play</button> <button class="btn btn-sm" data-action="edit-word" data-word="${w.word}">Edit</button></td></tr>`).join('')}</tbody></table></div></main>`; }
   function renderNotifications(){ return `<main class="page">${pageHead('Updates','Notifications','Invites, match results, rank movement, and event reminders.',`<button class="btn" data-action="mark-read">Mark all read</button>`)}<div class="card">${state.notifications.map(n=>`<div class="list-row"><span class="avatar">${n.type==='invite'?'1v1':'D'}</span><div class="list-main"><strong>${n.text}</strong><small>${n.read?'Read':'New'}</small></div>${n.type==='invite'?'<button class="btn btn-sm" data-action="accept-challenge">Open</button>':''}</div>`).join('')}</div></main>`; }
 
   function renderSchool(){
@@ -1151,6 +1165,16 @@
     if(action==='landing-menu'){document.querySelector('.landing-header')?.classList.toggle('menu-open');return;}
     if(action==='onboard-next'){
       const o=runtime.onboarding;
+      if(o.role==='school'){
+        if(runtime.onboardingStep===1){
+          o.schoolName=document.querySelector('#obSchoolName')?.value.trim()||'';
+          o.adminName=document.querySelector('#obAdminName')?.value.trim()||o.nickname||'Administrator';
+          o.country=document.querySelector('#obCountry')?.value||'Nigeria';
+          if(!o.schoolName){toast('Enter the school or organisation name.');return;}
+        }
+        if(runtime.onboardingStep<2){runtime.onboardingStep++;render();}else{completeOnboarding();}
+        return;
+      }
       const soundStep=o.role==='parent'?3:2;
       if(runtime.onboardingStep===soundStep&&document.querySelector('#consentCheck')&&!document.querySelector('#consentCheck').checked){toast('Parent or guardian consent is required for child voice features.');return;}
       if(o.role==='parent'&&runtime.onboardingStep===1){o.guardianName=document.querySelector('#obGuardianName')?.value.trim()||o.nickname||'Parent';o.country=document.querySelector('#obCountry')?.value||'Nigeria';}
@@ -1268,18 +1292,20 @@
     if(action==='create-event'){runtime.modal={type:'event',title:'Create event'};render();return;}
     if(action==='save-event'){const name=document.querySelector('#eventName')?.value.trim();if(!name){toast('Enter an event name.');return;}try{await services.firebase.createEvent({title:name,startsAt:document.querySelector('#eventDate')?.value||'',type:document.querySelector('#eventFormat')?.value||'1v1',school:profile().school});runtime.modal=null;toast('Event saved.');}catch(error){toast(error.message);}return;}
     if(action==='add-word'||action==='edit-word'){runtime.modal={type:'word',title:action==='add-word'?'Add word':'Edit word',word:target.dataset.word||''};render();return;}
+    if(action==='play-admin-word'){const entry=WORDS.find(word=>word.word===target.dataset.word);if(!entry)return;try{await services.audio.playWord(entry);}catch(error){toast(error.message);}return;}
     if(action==='save-word'){const word=document.querySelector('#wordText')?.value.trim().toLowerCase();const definition=document.querySelector('#wordDefinition')?.value.trim();if(!word||!definition){toast('Word and definition are required.');return;}const entry={word,definition,level:document.querySelector('#wordLevel')?.value||'Foundation',sentence:document.querySelector('#wordSentence')?.value.trim()||`Use ${word} in a sentence.`,part:document.querySelector('#wordPart')?.value.trim()||'word',origin:document.querySelector('#wordOrigin')?.value.trim()||'Unknown'};state.customWords=[...(state.customWords||[]).filter(item=>item.word!==word),entry];saveState();runtime.modal=null;toast(`${word.toUpperCase()} saved.`);render();return;}
     if(action==='generate-audio'){runtime.audioBusy=true;runtime.audioMessage='Generation started…';render();try{const result=await services.firebase.buildAudioLibrary();runtime.audioMessage=`${result.assetCount} audio files generated.`;toast(runtime.audioMessage);await hydrateAudioLibrary();}catch(error){runtime.audioMessage=error.message;console.error('Audio generation failed:',error);toast(error.message);}finally{runtime.audioBusy=false;render();}return;}
-    if(action==='test-pronunciations'){runtime.audioBusy=true;runtime.audioMessage='Regenerating Imagine and Enormous with fresh natural intonation…';render();try{const result=await services.firebase.regenerateTestPronunciations();runtime.audioMessage=`${result.words.join(' and ')} regenerated for review.`;await hydrateAudioLibrary();toast(runtime.audioMessage);}catch(error){runtime.audioMessage=error.message;console.error('Test pronunciation generation failed:',error);toast(error.message);}finally{runtime.audioBusy=false;render();}return;}
+    if(action==='test-pronunciations'){runtime.audioBusy=true;runtime.audioMessage='Regenerating seven selected words at speed 0.70…';render();try{const result=await services.firebase.regenerateTestPronunciations();runtime.audioMessage=`${result.assetCount} selected pronunciations regenerated for review.`;await hydrateAudioLibrary();toast(runtime.audioMessage);}catch(error){runtime.audioMessage=error.message;console.error('Test pronunciation generation failed:',error);toast(error.message);}finally{runtime.audioBusy=false;render();}return;}
     if(action==='regenerate-primary-pronunciations'){runtime.audioBusy=true;runtime.audioMessage='Regenerating the 60 normal word pronunciations only…';render();try{const result=await services.firebase.regeneratePrimaryPronunciations();runtime.audioMessage=`${result.assetCount} normal pronunciations regenerated. Other audio was unchanged.`;await hydrateAudioLibrary();toast(runtime.audioMessage);}catch(error){runtime.audioMessage=error.message;console.error('Primary pronunciation generation failed:',error);toast(error.message);}finally{runtime.audioBusy=false;render();}return;}
     if(action==='generate-alphabet'){runtime.audioBusy=true;runtime.audioMessage='Alphabet generation started…';render();try{const result=await services.firebase.buildAlphabetLibrary();runtime.audioMessage=`${result.assetCount} alphabet audio files generated.`;await hydrateAudioLibrary();}catch(error){runtime.audioMessage=error.message;console.error('Alphabet generation failed:',error);}finally{runtime.audioBusy=false;render();}return;}
   }
 
   async function completeOnboarding(demo=false){
     const o=runtime.onboarding;
-    const learnerName=o.role==='parent'?(o.learnerName||'Ada'):(o.nickname||'Ada');
-    const p={id:`p-${Date.now()}`,nickname:learnerName,displayName:learnerName,grade:o.grade,country:o.country,school:o.school,avatar:o.avatar||learnerName[0].toUpperCase()};
-    state={...state,initialized:true,role:o.role,accountOwner:o.role==='parent'?{name:o.guardianName||o.nickname||'Parent',country:o.country}:null,profiles:[p],activeProfileId:p.id};
+    const schoolAccount=o.role==='school'?{name:o.schoolName,adminName:o.adminName||o.nickname||'Administrator',country:o.country}:null;
+    const learnerName=o.role==='parent'?(o.learnerName||'Ada'):o.role==='school'?(schoolAccount.adminName):(o.nickname||'Ada');
+    const p={id:`p-${Date.now()}`,nickname:learnerName,displayName:learnerName,grade:o.role==='school'?'School administrator':o.grade,country:o.country,school:o.role==='school'?o.schoolName:o.school,avatar:o.avatar||learnerName[0].toUpperCase()};
+    state={...state,initialized:true,role:o.role,accountOwner:o.role==='parent'?{name:o.guardianName||o.nickname||'Parent',country:o.country}:null,schoolAccount,profiles:[p],activeProfileId:p.id};
     // Demo is intentionally local: access to the product must not wait for Firebase.
     if(demo){
       localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
@@ -1287,11 +1313,17 @@
       render();
       return;
     }
-    saveState();
-    if(services.firebase.user&&!services.firebase.user.isAnonymous)await services.firebase.bootstrapPlayer(p).catch(error=>toast(error.message));
+    await services.firebase.updateAccountProfile({
+      role:o.role,
+      displayName:o.role==='parent'?(state.accountOwner?.name||'Parent'):o.role==='school'?(state.schoolAccount?.adminName||'Administrator'):p.nickname,
+      schoolName:o.role==='school'?state.schoolAccount?.name:null
+    });
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    await services.firebase.save('app-state',state);
+    if(o.role!=='school'&&services.firebase.user&&!services.firebase.user.isAnonymous)await services.firebase.bootstrapPlayer(p).catch(error=>toast(error.message));
     warmAudioInBackground();
-    startLiveData();
-    navigate(o.role==='parent'?'parent':'home');
+    if(o.role!=='school')startLiveData();
+    navigate(accountLandingRoute());
     render();
   }
   function startLiveData(){
@@ -1421,7 +1453,7 @@
     runtime.authBusy=true;render();
     try{
       if(runtime.authMode==='signup'){
-        await services.firebase.createAccount(email,password,{displayName:name,role:'student'});
+        await services.firebase.createAccount(email,password,{displayName:name,role:'pending'});
         warmAudioInBackground();
         runtime.onboarding.nickname=name;
         runtime.onboarding.avatar=(name[0]||'A').toUpperCase();
@@ -1430,12 +1462,21 @@
       }else{
         await services.firebase.login(email,password);
         warmAudioInBackground();
-        const remoteState=await services.firebase.load('app-state');
+        const [remoteState,accountProfile]=await Promise.all([
+          services.firebase.load('app-state'),
+          services.firebase.loadAccountProfile()
+        ]);
         if(remoteState){
           state=syncAuthenticatedIdentity(remoteState,services.firebase.user);
+          if(accountProfile?.role==='parent'){
+            const ownerName=state.accountOwner?.name||accountProfile.displayName||services.firebase.user?.displayName||'Parent';
+            state={...state,role:'parent',accountOwner:{...(state.accountOwner||{}),name:ownerName,country:state.accountOwner?.country||profile().country||'Nigeria'}};
+          }else if(accountProfile?.role==='school'){
+            state={...state,role:'school',schoolAccount:{...(state.schoolAccount||{}),name:state.schoolAccount?.name||accountProfile.schoolName||'School',adminName:state.schoolAccount?.adminName||accountProfile.displayName||services.firebase.user?.displayName||'Administrator',country:state.schoolAccount?.country||'Nigeria'}};
+          }
           localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
           saveState();
-          navigate(isParentAccount()?'parent':'home');
+          navigate(accountLandingRoute());
         }else{
           runtime.onboarding.nickname=services.firebase.user?.displayName||'';
           runtime.onboardingStep=0;
@@ -1505,8 +1546,21 @@
       if(!user)return;
       warmAudioInBackground();
       try{
-        const remoteState=await services.firebase.load('app-state');
-        if(remoteState){state=syncAuthenticatedIdentity(remoteState,user);localStorage.setItem(STORAGE_KEY,JSON.stringify(state));saveState();}
+        const [remoteState,accountProfile]=await Promise.all([
+          services.firebase.load('app-state'),
+          services.firebase.loadAccountProfile()
+        ]);
+        if(remoteState){
+          state=syncAuthenticatedIdentity(remoteState,user);
+          if(accountProfile?.role==='parent'){
+            const ownerName=state.accountOwner?.name||accountProfile.displayName||user.displayName||'Parent';
+            state={...state,role:'parent',accountOwner:{...(state.accountOwner||{}),name:ownerName,country:state.accountOwner?.country||profile().country||'Nigeria'}};
+          }else if(accountProfile?.role==='school'){
+            state={...state,role:'school',schoolAccount:{...(state.schoolAccount||{}),name:state.schoolAccount?.name||accountProfile.schoolName||'School',adminName:state.schoolAccount?.adminName||accountProfile.displayName||user.displayName||'Administrator',country:state.schoolAccount?.country||'Nigeria'}};
+          }
+          localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+          saveState();
+        }
         startLiveData();
         render();
       }catch(error){console.warn('Firebase startup failed:',error.message);}

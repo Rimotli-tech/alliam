@@ -90,6 +90,21 @@
       const credential = await auth.signInWithEmailAndPassword(email, password);
       return credential.user;
     },
+    async loadAccountProfile() {
+      if (!this.configured) return null;
+      const user = await ensureFirebaseUser();
+      const snapshot = await db.doc(`accounts/${user.uid}`).get();
+      return snapshot.exists ? snapshot.data() : null;
+    },
+    async updateAccountProfile(profile = {}) {
+      if (!this.configured) return;
+      const user = await ensureFirebaseUser();
+      await db.doc(`accounts/${user.uid}`).set({
+        ...profile,
+        email: user.email || "",
+        updatedAt: window.firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    },
     call: callFunction,
     async bootstrapPlayer(profile = {}) {
       return callFunction("bootstrapPlayer", { profile });

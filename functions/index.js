@@ -287,14 +287,22 @@ exports.regenerateTestPronunciations = onCall(
       throw new HttpsError("permission-denied", "An Alliam audio administrator is required.");
     }
 
-    const words = ["imagine", "enormous"];
-    const version = `alliam-one-v6-intonation-retry-${Date.now()}`;
+    const words = [
+      "rhythm",
+      "extraordinary",
+      "conscience",
+      "manoeuvre",
+      "connoisseur",
+      "indefatigable",
+      "lachrymose",
+    ];
+    const version = `alliam-one-v7-slow-natural-${Date.now()}`;
     const bucket = getStorage().bucket();
     const results = {};
 
     for (const word of words) {
       const path = `audio/${version}/${word}/pronunciation.mp3`;
-      const audio = await synthesize(word, 0.93, {
+      const audio = await synthesize(word, 0.70, {
         model: "eleven_flash_v2",
         stability: 1,
       });
@@ -312,7 +320,7 @@ exports.regenerateTestPronunciations = onCall(
         pronunciationModel: "eleven_flash_v2",
         pronunciationPhoneme: FieldValue.delete(),
         pronunciationMode: "natural",
-        pronunciationSpeed: 0.93,
+        pronunciationSpeed: 0.70,
         pronunciationStability: 1,
         pronunciationVersion: version,
         pronunciationUpdatedAt: FieldValue.serverTimestamp(),
@@ -321,7 +329,7 @@ exports.regenerateTestPronunciations = onCall(
       results[word] = asset;
     }
 
-    return { versionId: version, wordCount: 2, assetCount: 2, words: Object.keys(results) };
+    return { versionId: version, wordCount: words.length, assetCount: words.length, words: Object.keys(results) };
   },
 );
 
