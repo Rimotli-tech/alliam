@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
+import '../../../core/audio/sound_effects_service.dart';
 import '../../auth/data/account_repository.dart';
 import '../../train/data/training_audio_service.dart';
 import '../../train/data/word_repository.dart';
@@ -270,7 +271,10 @@ class _MatchPageState extends State<MatchPage> {
     } catch (_) {
       // The route should remain escapable if the network disappears.
     }
-    if (mounted) context.go('/compete');
+    if (mounted) {
+      unawaited(SoundEffectsService.instance.back());
+      context.go('/compete');
+    }
   }
 
   @override

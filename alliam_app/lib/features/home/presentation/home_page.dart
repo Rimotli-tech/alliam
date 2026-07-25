@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/alliam_colors.dart';
+import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/widgets/alliam_card.dart';
 import '../../auth/data/account_repository.dart';
@@ -150,13 +152,25 @@ class HomePage extends StatelessWidget {
                                           icon: Icons.fitness_center_rounded,
                                           title: 'Train',
                                           subtitle: 'Build your spelling',
-                                          onTap: () => context.go('/train'),
+                                          onTap: () {
+                                            unawaited(
+                                              SoundEffectsService.instance
+                                                  .startModule(),
+                                            );
+                                            context.go('/train');
+                                          },
                                         ),
                                         AlliamCard(
                                           icon: Icons.sports_kabaddi_rounded,
                                           title: 'Compete',
                                           subtitle: 'Enter the arena',
-                                          onTap: () => context.go('/compete'),
+                                          onTap: () {
+                                            unawaited(
+                                              SoundEffectsService.instance
+                                                  .startModule(),
+                                            );
+                                            context.go('/compete');
+                                          },
                                         ),
                                         const AlliamCard(
                                           icon: Icons.leaderboard_outlined,

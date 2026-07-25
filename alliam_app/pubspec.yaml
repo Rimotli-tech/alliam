@@ -67,6 +67,19 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/audio/alliam-background.mp3
+    - assets/audio/start-module.mp3
+    - assets/audio/correct-sound.mp3
+    - assets/audio/back.mp3
+    - assets/audio/countdown-beep.mp3
+    - assets/audio/key-1.mp3
+    - assets/audio/key-2.mp3
+    - assets/audio/key-3.mp3
+    - assets/audio/wrong-answer.mp3
+    - assets/audio/word-entry.mp3
+    - assets/audio/next-word.mp3
+
   fonts:
     - family: Talina DEMO
       fonts:

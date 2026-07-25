@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../../core/audio/background_music_service.dart';
 import '../domain/spelling_word.dart';
 
 class TrainingAudioService {
@@ -20,6 +21,7 @@ class TrainingAudioService {
     await _wordPlayer?.stop();
     final player = AudioPlayer();
     _wordPlayer = player;
+    await BackgroundMusicService.instance.duck();
     try {
       await player.setUrl(url);
       await player.seek(Duration.zero);
@@ -27,6 +29,7 @@ class TrainingAudioService {
     } finally {
       if (identical(_wordPlayer, player)) _wordPlayer = null;
       await player.dispose();
+      await BackgroundMusicService.instance.restore();
     }
   }
 
@@ -35,20 +38,25 @@ class TrainingAudioService {
     required void Function(int index) onLetter,
   }) async {
     final alphabet = await _loadAlphabet();
-    for (var index = 0; index < word.length; index++) {
-      final letter = word[index].toLowerCase();
-      final asset = alphabet[letter];
-      if (asset == null || asset.storagePath.isEmpty) {
-        onLetter(-1);
-        throw StateError(
-          'Recorded alphabet audio is unavailable for ${letter.toUpperCase()}.',
-        );
+    await BackgroundMusicService.instance.duck();
+    try {
+      for (var index = 0; index < word.length; index++) {
+        final letter = word[index].toLowerCase();
+        final asset = alphabet[letter];
+        if (asset == null || asset.storagePath.isEmpty) {
+          onLetter(-1);
+          throw StateError(
+            'Recorded alphabet audio is unavailable for ${letter.toUpperCase()}.',
+          );
+        }
+        onLetter(index);
+        await _playLetter(asset);
+        await Future<void>.delayed(const Duration(milliseconds: 260));
       }
-      onLetter(index);
-      await _playLetter(asset);
-      await Future<void>.delayed(const Duration(milliseconds: 260));
+    } finally {
+      onLetter(-1);
+      await BackgroundMusicService.instance.restore();
     }
-    onLetter(-1);
   }
 
   Future<void> _playLetter(AudioAsset asset) async {

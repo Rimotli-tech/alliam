@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../auth/data/account_repository.dart';
+import '../../../core/audio/sound_effects_service.dart';
 import '../data/competition_service.dart';
 import 'match_page.dart';
 import '../../../core/widgets/alliam_card.dart';
@@ -58,6 +61,7 @@ class CompetePage extends StatelessWidget {
   }
 
   void _openArena(BuildContext context, int index) {
+    unawaited(SoundEffectsService.instance.startModule());
     if (index == 0 || index == 1) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(

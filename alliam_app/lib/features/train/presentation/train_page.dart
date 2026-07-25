@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/widgets/alliam_card.dart';
 import '../../../core/widgets/alliam_page.dart';
 import '../domain/training_mode.dart';
@@ -41,7 +44,10 @@ class TrainPage extends StatelessWidget {
                     ? mode.subtitle
                     : '${mode.subtitle} · Soon',
                 onTap: mode.isImplemented
-                    ? () => context.go('/train/session/${mode.slug}')
+                    ? () {
+                        unawaited(SoundEffectsService.instance.startModule());
+                        context.go('/train/session/${mode.slug}');
+                      }
                     : () => ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(

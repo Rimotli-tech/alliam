@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../audio/sound_effects_service.dart';
 import '../theme/alliam_colors.dart';
 import 'alliam_background.dart';
 
@@ -36,9 +39,12 @@ class AlliamPage extends StatelessWidget {
                     if (showBack)
                       IconButton(
                         tooltip: 'Back',
-                        onPressed: () => context.canPop()
-                            ? context.pop()
-                            : context.go('/home'),
+                        onPressed: () {
+                          unawaited(SoundEffectsService.instance.back());
+                          context.canPop()
+                              ? context.pop()
+                              : context.go('/home');
+                        },
                         icon: const Icon(Icons.arrow_back_rounded),
                       )
                     else

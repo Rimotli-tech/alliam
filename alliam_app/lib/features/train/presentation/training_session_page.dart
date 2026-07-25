@@ -9,6 +9,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
+import '../../../core/audio/background_music_service.dart';
+import '../../../core/audio/sound_effects_service.dart';
 import '../data/training_audio_service.dart';
 import '../data/training_progress_repository.dart';
 import '../data/word_repository.dart';
@@ -51,6 +53,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   int _lives = 3;
   int _streak = 0;
   int _activeSpellingLetter = -1;
+  int _typedLength = 0;
   int _runId = 0;
   bool _showHeldWord = false;
   bool _lastCorrect = false;
@@ -82,6 +85,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   void dispose() {
     _runId++;
     _timer?.cancel();
+    unawaited(BackgroundMusicService.instance.leaveExercise());
     _answer.dispose();
     _focus.dispose();
     _audio.dispose();
@@ -92,6 +96,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     final run = ++_runId;
     _timer?.cancel();
     _answer.clear();
+    _typedLength = 0;
     setState(() {
       _phase = _SessionPhase.loading;
       _error = null;
@@ -119,6 +124,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     final activeRun = run ?? ++_runId;
     _timer?.cancel();
     _answer.clear();
+    _typedLength = 0;
     _lastCorrect = false;
     _showHeldWord = false;
     setState(() {
@@ -138,26 +144,19 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     }
     if (!_valid(activeRun)) return;
 
+    if (firstWord) {
+      await _runCountdown(3, activeRun);
+      if (!_valid(activeRun)) return;
+    }
+    setState(() => _phase = _SessionPhase.teaching);
+    unawaited(SoundEffectsService.instance.wordEntry());
+
     if (widget.mode == TrainingMode.hearAndSpell) {
-      if (firstWord) {
-        await _runCountdown(3, activeRun);
-        if (!_valid(activeRun)) return;
-      }
       await _teachHearAndSpell(activeRun);
     } else if (widget.mode == TrainingMode.wordFlash) {
-      if (firstWord) {
-        await _runCountdown(3, activeRun);
-        if (!_valid(activeRun)) return;
-      }
-      setState(() => _phase = _SessionPhase.teaching);
       await _wait(const Duration(seconds: 3), activeRun);
       if (_valid(activeRun)) _beginAttempt();
     } else if (widget.mode == TrainingMode.reverseSpell) {
-      if (firstWord) {
-        await _runCountdown(3, activeRun);
-        if (!_valid(activeRun)) return;
-      }
-      setState(() => _phase = _SessionPhase.teaching);
       await _spellCurrent(activeRun);
       if (_valid(activeRun)) _beginAttempt();
     } else if ({
@@ -167,21 +166,11 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       TrainingMode.buildTheWord,
       TrainingMode.themeChallenge,
     }.contains(widget.mode)) {
-      if (firstWord) {
-        await _runCountdown(3, activeRun);
-        if (!_valid(activeRun)) return;
-      }
-      setState(() => _phase = _SessionPhase.teaching);
       await _playPronunciation();
       if (!_valid(activeRun)) return;
       await _wait(const Duration(seconds: 2), activeRun);
       if (_valid(activeRun)) _beginAttempt();
     } else {
-      if (firstWord) {
-        await _runCountdown(3, activeRun);
-        if (!_valid(activeRun)) return;
-      }
-      setState(() => _phase = _SessionPhase.teaching);
       await _playPronunciation();
       if (_valid(activeRun)) {
         _beginAttempt();
@@ -220,11 +209,17 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   }
 
   Future<void> _runCountdown(int from, int run) async {
-    setState(() => _phase = _SessionPhase.countdown);
-    for (var count = from; count > 0; count--) {
-      if (!_valid(run)) return;
-      setState(() => _countdown = count);
-      await _wait(const Duration(seconds: 1), run);
+    await BackgroundMusicService.instance.pauseForCountdown();
+    try {
+      setState(() => _phase = _SessionPhase.countdown);
+      for (var count = from; count > 0; count--) {
+        if (!_valid(run)) return;
+        setState(() => _countdown = count);
+        unawaited(SoundEffectsService.instance.countdown());
+        await _wait(const Duration(seconds: 1), run);
+      }
+    } finally {
+      await BackgroundMusicService.instance.resumeAfterCountdown();
     }
   }
 
@@ -233,7 +228,11 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _phase = _SessionPhase.attempt;
       _activeSpellingLetter = -1;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
   }
 
   Future<void> _playPronunciation() async {
@@ -262,39 +261,16 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     });
   }
 
-  void _handleKeyEvent(KeyEvent event) {
-    if (_phase != _SessionPhase.attempt || event is! KeyDownEvent) return;
-
-    if (event.logicalKey == LogicalKeyboardKey.enter) {
-      if (_answer.text.isNotEmpty) unawaited(_submit());
-      return;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.backspace) {
-      if (_answer.text.isNotEmpty) {
-        _answer.text = _answer.text.substring(0, _answer.text.length - 1);
-        setState(() {});
-      }
-      return;
-    }
-
-    final character = event.character?.toLowerCase();
-    if (character == null ||
-        !RegExp(r'^[a-z]$').hasMatch(character) ||
-        _answer.text.length >= (_current?.word.length ?? 0)) {
-      return;
-    }
-    _answer.text += character;
-    setState(() {});
-  }
-
   Future<void> _submit({bool timedOut = false}) async {
     if (_phase != _SessionPhase.attempt) return;
     _timer?.cancel();
     final correct = !timedOut && _answer.text == _current!.word;
     if (correct) {
       _incorrectWords.remove(_current!.word);
+      unawaited(SoundEffectsService.instance.correct());
     } else {
       _incorrectWords.add(_current!.word);
+      unawaited(SoundEffectsService.instance.wrongAnswer());
     }
     setState(() {
       _lastCorrect = correct;
@@ -316,6 +292,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       await _recordProgress();
       return;
     }
+    unawaited(SoundEffectsService.instance.nextWord());
     setState(() => _index++);
     await _prepareCurrent(firstWord: false);
   }
@@ -442,7 +419,10 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         children: [
           _SessionIconButton(
             tooltip: 'Back to training',
-            onPressed: () => context.go('/train'),
+            onPressed: () {
+              unawaited(SoundEffectsService.instance.back());
+              context.go('/train');
+            },
             icon: const Icon(Icons.home_outlined),
           ),
           const Spacer(),
@@ -653,94 +633,144 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         ? 'Name the word'
         : 'Your turn';
 
-    return KeyboardListener(
+    return GestureDetector(
       key: ValueKey('exercise-$_index'),
-      focusNode: _focus,
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: _focus.requestFocus,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 18, 24, 40),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 980),
-              child: Column(
-                children: [
+      behavior: HitTestBehavior.translucent,
+      onTap: () {
+        if (_phase != _SessionPhase.attempt ||
+            _answer.text.length >= _current!.word.length) {
+          return;
+        }
+        _focus.requestFocus();
+        SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+      },
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 18, 24, 40),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 980),
+            child: Column(
+              children: [
+                if (_phase == _SessionPhase.attempt)
                   SizedBox(
-                    height: 76,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.headlineMedium
-                              ?.copyWith(
-                                color: AlliamColors.coral,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          feedback
-                              ? _lastCorrect
-                                    ? 'That spelling is correct.'
-                                    : 'The correct spelling is shown below.'
-                              : teaching
-                              ? 'Stay focused.'
-                              : 'Type the spelling, then submit.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (widget.mode == TrainingMode.timedDrill &&
-                      _phase == _SessionPhase.attempt) ...[
-                    const SizedBox(height: 18),
-                    _Clock(seconds: _secondsLeft),
-                  ],
-                  if (widget.mode.isTimed &&
-                      widget.mode != TrainingMode.timedDrill &&
-                      _phase == _SessionPhase.attempt) ...[
-                    const SizedBox(height: 18),
-                    _Clock(seconds: _secondsLeft),
-                  ],
-                  if (widget.mode == TrainingMode.survivalRun ||
-                      widget.mode == TrainingMode.streakChallenge) ...[
-                    const SizedBox(height: 14),
-                    _RunStatus(
-                      lives: widget.mode == TrainingMode.survivalRun
-                          ? _lives
-                          : null,
-                      streak: _streak,
-                    ),
-                  ],
-                  const SizedBox(height: 22),
-                  _modePrompt(context, teaching: teaching),
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    height: 250,
-                    child: Center(
-                      child: LetterDiamonds(
-                        word: _current!.word,
-                        entered: _answer.text,
-                        revealWord: reveal,
-                        success: feedback && _lastCorrect,
-                        activeIndex: teaching ? _activeSpellingLetter : -1,
+                    width: 1,
+                    height: 1,
+                    child: Opacity(
+                      opacity: 0.01,
+                      child: TextField(
+                        controller: _answer,
+                        focusNode: _focus,
+                        autofocus: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        enableInteractiveSelection: false,
+                        showCursor: false,
+                        textCapitalization: TextCapitalization.none,
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.done,
+                        maxLength: _current!.word.length,
+                        buildCounter:
+                            (
+                              context, {
+                              required currentLength,
+                              required isFocused,
+                              required maxLength,
+                            }) => null,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp('[a-zA-Z]')),
+                          _LowerCaseTextFormatter(),
+                        ],
+                        onChanged: (value) {
+                          if (value.length > _typedLength) {
+                            unawaited(SoundEffectsService.instance.key());
+                          }
+                          _typedLength = value.length;
+                          setState(() {});
+                          if (value.length >= _current!.word.length) {
+                            _focus.unfocus();
+                            SystemChannels.textInput.invokeMethod<void>(
+                              'TextInput.hide',
+                            );
+                          }
+                        },
+                        onSubmitted: (_) {
+                          if (_answer.text.isNotEmpty) unawaited(_submit());
+                        },
                       ),
                     ),
                   ),
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    height: 150,
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: _exerciseControls(feedback),
-                    ),
+                SizedBox(
+                  height: 76,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: AlliamColors.coral,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        feedback
+                            ? _lastCorrect
+                                  ? 'That spelling is correct.'
+                                  : 'The correct spelling is shown below.'
+                            : teaching
+                            ? 'Stay focused.'
+                            : 'Type the spelling, then submit.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                if (widget.mode == TrainingMode.timedDrill &&
+                    _phase == _SessionPhase.attempt) ...[
+                  const SizedBox(height: 18),
+                  _Clock(seconds: _secondsLeft),
+                ],
+                if (widget.mode.isTimed &&
+                    widget.mode != TrainingMode.timedDrill &&
+                    _phase == _SessionPhase.attempt) ...[
+                  const SizedBox(height: 18),
+                  _Clock(seconds: _secondsLeft),
+                ],
+                if (widget.mode == TrainingMode.survivalRun ||
+                    widget.mode == TrainingMode.streakChallenge) ...[
+                  const SizedBox(height: 14),
+                  _RunStatus(
+                    lives: widget.mode == TrainingMode.survivalRun
+                        ? _lives
+                        : null,
+                    streak: _streak,
                   ),
                 ],
-              ),
+                const SizedBox(height: 22),
+                _modePrompt(context, teaching: teaching),
+                const SizedBox(height: 22),
+                SizedBox(
+                  height: 250,
+                  child: Center(
+                    child: LetterDiamonds(
+                      word: _current!.word,
+                      entered: _answer.text,
+                      revealWord: reveal,
+                      success: feedback && _lastCorrect,
+                      activeIndex: teaching ? _activeSpellingLetter : -1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  height: 150,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: _exerciseControls(feedback),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -841,6 +871,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                         _answer.selection = TextSelection.collapsed(
                           offset: _answer.text.length,
                         );
+                        _typedLength = _answer.text.length;
                         setState(() {});
                         _focus.requestFocus();
                       },
@@ -1111,6 +1142,20 @@ class _RunStatus extends StatelessWidget {
           ),
         _ClueChip(icon: Icons.local_fire_department_outlined, text: '$streak'),
       ],
+    );
+  }
+}
+
+class _LowerCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(
+      text: newValue.text.toLowerCase(),
+      selection: TextSelection.collapsed(offset: newValue.text.length),
+      composing: TextRange.empty,
     );
   }
 }
