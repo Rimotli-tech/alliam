@@ -319,6 +319,50 @@
       }
       return payload.result;
     },
+    async approveCoreWordLibrary() {
+      if (!this.configured) throw new Error("Firebase is not configured.");
+      initializeFirebase();
+      const user = auth.currentUser;
+      if (!user) throw new Error("Sign in with the Alliam administrator account first.");
+      const response = await fetch(
+        "https://europe-west1-spelliam-ad3fd.cloudfunctions.net/approveCoreWordLibrary",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${await user.getIdToken()}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ data: {} })
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error?.message || "Word approval failed.");
+      }
+      return payload.result;
+    },
+    async generateApprovedNext200Pronunciations() {
+      if (!this.configured) throw new Error("Firebase is not configured.");
+      initializeFirebase();
+      const user = auth.currentUser;
+      if (!user) throw new Error("Sign in with the Alliam administrator account first.");
+      const response = await fetch(
+        "https://europe-west1-spelliam-ad3fd.cloudfunctions.net/generateApprovedNext200Pronunciations",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${await user.getIdToken()}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ data: {} })
+        }
+      );
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error?.message || "Approved 200-word generation failed.");
+      }
+      return payload.result;
+    },
     async buildAlphabetLibrary() {
       if (!this.configured) throw new Error("Firebase is not configured.");
       initializeFirebase();

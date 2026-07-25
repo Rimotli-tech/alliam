@@ -6,6 +6,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
+const { NEXT_200_WORDS } = require("./approved-word-batches");
 
 initializeApp();
 
@@ -397,6 +398,286 @@ exports.regeneratePrimaryPronunciations = onCall(
     });
 
     return { versionId: version, wordCount: WORDS.length, assetCount };
+  },
+);
+
+exports.approveCoreWordLibrary = onCall(
+  {
+    region: AUDIO_REGION,
+    timeoutSeconds: 1800,
+    memory: "1GiB",
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
+    const isAudioAdmin = request.auth.token.admin === true ||
+      request.auth.token.email === "rimotli.tech@gmail.com";
+    if (!isAudioAdmin) {
+      throw new HttpsError("permission-denied", "An Alliam content administrator is required.");
+    }
+
+    const approvalCollection = "core-60-v1";
+    const db = getFirestore();
+    const bucket = getStorage().bucket();
+    let approvedAssetCount = 0;
+    const missingAssets = [];
+
+    for (const entry of WORDS) {
+      const wordRef = db.doc(`words/${entry.word}`);
+      const snapshot = await wordRef.get();
+      if (!snapshot.exists) {
+        throw new HttpsError("failed-precondition", `Approved word is missing: ${entry.word}`);
+      }
+
+      const rawAudio = snapshot.data()?.audio || {};
+      const approvedAudio = {};
+      for (const [kind, rawAsset] of Object.entries(rawAudio)) {
+        const asset = typeof rawAsset === "string"
+          ? { storagePath: rawAsset }
+          : { ...(rawAsset || {}) };
+        if (!asset.storagePath) continue;
+
+        approvedAudio[kind] = {
+          ...asset,
+          approved: true,
+          approvalCollection,
+        };
+
+        const file = bucket.file(asset.storagePath);
+        try {
+          const [metadata] = await file.getMetadata();
+          await file.setMetadata({
+            metadata: {
+              ...(metadata.metadata || {}),
+              approved: "true",
+              approvalCollection,
+              approvedWord: entry.word,
+              approvedAudioKind: kind,
+            },
+          });
+          approvedAssetCount += 1;
+        } catch (error) {
+          if (Number(error?.code) === 404) {
+            missingAssets.push(asset.storagePath);
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      if (!approvedAudio.pronunciation?.storagePath) {
+        throw new HttpsError(
+          "failed-precondition",
+          `Approved word has no primary pronunciation: ${entry.word}`,
+        );
+      }
+
+      await wordRef.set({
+        approved: true,
+        status: "published",
+        approvalCollection,
+        approvedAt: FieldValue.serverTimestamp(),
+        approvedAudio,
+        audio: approvedAudio,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    await db.doc(`wordCollections/${approvalCollection}`).set({
+      id: approvalCollection,
+      approved: true,
+      status: "published",
+      wordCount: WORDS.length,
+      approvedAssetCount,
+      missingAssets,
+      wordIds: WORDS.map((entry) => entry.word),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return {
+      approvalCollection,
+      wordCount: WORDS.length,
+      approvedAssetCount,
+      missingAssetCount: missingAssets.length,
+      missingAssets,
+    };
+  },
+);
+
+exports.generateApprovedNext200Pronunciations = onCall(
+  {
+    region: AUDIO_REGION,
+    secrets: [ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID],
+    timeoutSeconds: 1800,
+    memory: "1GiB",
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
+    const isAudioAdmin = request.auth.token.admin === true ||
+      request.auth.token.email === "rimotli.tech@gmail.com";
+    if (!isAudioAdmin) {
+      throw new HttpsError("permission-denied", "An Alliam audio administrator is required.");
+    }
+
+    const approvalCollection = "grade-1-2-200-v1";
+    const version = `${approvalCollection}-${Date.now()}`;
+    const db = getFirestore();
+    const bucket = getStorage().bucket();
+    const manifestRef = db.doc(`wordCollections/${approvalCollection}`);
+    let generatedCount = 0;
+
+    await manifestRef.set({
+      id: approvalCollection,
+      approved: false,
+      status: "generating",
+      wordCount: NEXT_200_WORDS.length,
+      generatedCount: 0,
+      voiceId: ELEVENLABS_VOICE_ID.value(),
+      model: "eleven_flash_v2",
+      speed: 0.70,
+      stability: 1,
+      pronunciationMode: "natural",
+      version,
+      wordIds: NEXT_200_WORDS.map((entry) => entry.word),
+      startedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    try {
+      for (const entry of NEXT_200_WORDS) {
+        const path = `audio/${version}/${entry.word}/pronunciation.mp3`;
+        const audio = await synthesize(entry.word, 0.70, {
+          model: "eleven_flash_v2",
+          stability: 1,
+        });
+        await bucket.file(path).save(audio, {
+          resumable: false,
+          contentType: "audio/mpeg",
+          metadata: {
+            cacheControl: "public,max-age=31536000,immutable",
+            metadata: {
+              wordId: entry.word,
+              kind: "pronunciation",
+              voiceVersion: version,
+              approved: "true",
+              approvalCollection,
+              stage: String(entry.stage),
+              grade: entry.grade,
+            },
+          },
+        });
+
+        const asset = {
+          storagePath: path,
+          contentType: "audio/mpeg",
+          approved: true,
+          approvalCollection,
+        };
+        await db.doc(`words/${entry.word}`).set({
+          word: entry.word,
+          level: entry.level,
+          grade: entry.grade,
+          stage: entry.stage,
+          approved: true,
+          status: "published",
+          approvalCollection,
+          audio: { pronunciation: asset },
+          approvedAudio: { pronunciation: asset },
+          pronunciationModel: "eleven_flash_v2",
+          pronunciationMode: "natural",
+          pronunciationSpeed: 0.70,
+          pronunciationStability: 1,
+          pronunciationPhoneme: FieldValue.delete(),
+          pronunciationVersion: version,
+          pronunciationUpdatedAt: FieldValue.serverTimestamp(),
+          approvedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        generatedCount += 1;
+        if (generatedCount % 10 === 0) {
+          await manifestRef.set({
+            generatedCount,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+
+      const retryWord = "rhythm";
+      const retryPath = `audio/${version}/${retryWord}/pronunciation.mp3`;
+      const retryAudio = await synthesize(retryWord, 0.70, {
+        model: "eleven_flash_v2",
+        stability: 1,
+      });
+      await bucket.file(retryPath).save(retryAudio, {
+        resumable: false,
+        contentType: "audio/mpeg",
+        metadata: {
+          cacheControl: "public,max-age=31536000,immutable",
+          metadata: {
+            wordId: retryWord,
+            kind: "pronunciation",
+            voiceVersion: version,
+            approved: "true",
+            approvalCollection: "core-60-v1",
+            reviewRetry: "single-syllable-natural-intonation",
+          },
+        },
+      });
+      const retryAsset = {
+        storagePath: retryPath,
+        contentType: "audio/mpeg",
+        approved: true,
+        approvalCollection: "core-60-v1",
+      };
+      await db.doc(`words/${retryWord}`).set({
+        audio: { pronunciation: retryAsset },
+        approvedAudio: { pronunciation: retryAsset },
+        pronunciationModel: "eleven_flash_v2",
+        pronunciationMode: "natural",
+        pronunciationSpeed: 0.70,
+        pronunciationStability: 1,
+        pronunciationPhoneme: FieldValue.delete(),
+        pronunciationVersion: version,
+        pronunciationReviewRetry: "single-syllable-natural-intonation",
+        pronunciationUpdatedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      await manifestRef.set({
+        approved: true,
+        status: "published",
+        generatedCount,
+        assetCount: generatedCount,
+        queuedRetryCount: 1,
+        queuedRetryWords: [retryWord],
+        totalGeneratedAudioCount: generatedCount + 1,
+        completedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return {
+        approvalCollection,
+        version,
+        wordCount: NEXT_200_WORDS.length,
+        assetCount: generatedCount,
+        queuedRetryCount: 1,
+        queuedRetryWords: [retryWord],
+        totalGeneratedAudioCount: generatedCount + 1,
+      };
+    } catch (error) {
+      await manifestRef.set({
+        approved: false,
+        status: "failed",
+        generatedCount,
+        error: String(error?.message || error).slice(0, 500),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      console.error("Approved 200-word generation failed", error);
+      throw new HttpsError(
+        "internal",
+        String(error?.message || "Approved word generation failed.").slice(0, 500),
+      );
+    }
   },
 );
 

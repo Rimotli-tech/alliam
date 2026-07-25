@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "297000825350",
+    "project_id": "spelliam-ad3fd",
+    "storage_bucket": "spelliam-ad3fd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:297000825350:android:8742727f6ae3d13f26c987",
+        "android_client_info": {
+          "package_name": "tech.rimotli.alliam_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "297000825350-65hr2kgctjdvqm6ghsggfpf6562a7mvg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBkPTt4XzReJHkGe0Ew8_CM_OggTrokKEQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "297000825350-65hr2kgctjdvqm6ghsggfpf6562a7mvg.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

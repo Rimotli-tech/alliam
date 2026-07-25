@@ -15,6 +15,12 @@
     "ignore": [
       "firebase.json",
       ".firebaserc",
+      "alliam_app/**",
+      ".tools/**",
+      ".pub-cache/**",
+      ".appdata/**",
+      ".localappdata/**",
+      ".firebase/**",
       "**/.*",
       "**/node_modules/**"
     ],

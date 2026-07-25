@@ -1,16 +1,20 @@
 {
-  "nextProcessingBatch": [
+  "nextProcessingBatch": [],
+  "processed": [
     {
       "word": "rhythm",
-      "assetAction": "preserve-current-until-next-batch",
+      "assetAction": "regenerated-with-approved-next-200-batch",
       "issueType": "intonation",
       "reviewNote": "Weakest of the 0.70-speed batch. The voice appears to place syllabic stress on both 'rhy' and 'thm'; aim for a natural single-syllable delivery.",
-      "currentSettings": {
-        "speed": 0.7,
+      "processedSettings": {
+        "voiceId": "8DzKSPdgEQPaK5vKG0Rs",
+        "speed": 0.93,
         "stability": 1,
         "pronunciationMode": "natural",
-        "explicitPhonemes": false
-      }
+        "explicitPhonemes": false,
+        "freshStoragePath": true
+      },
+      "processedWithCollection": "grade-1-2-200-v1"
     }
   ]
 }

@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 functions/node_modules/
+.tools/
+.pub-cache/
+.appdata/
+.localappdata/
+.gitconfig-codex
 
 # Local environment and secret files
 .env
