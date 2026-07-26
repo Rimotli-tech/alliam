@@ -7,6 +7,20 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null && request.auth.token.admin == true;
     }
+    function isOrganizationMember(organizationId) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+    function ownsOrganization(organizationId) {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid;
+    }
+    function hasOrganizationPermission(organizationId, permission) {
+      return ownsOrganization(organizationId) ||
+        (isOrganizationMember(organizationId) &&
+          get(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid)).data.permissions[permission] == true);
+    }
 
     match /accounts/{accountId} {
       allow read: if ownsAccount(accountId) || isAdmin();
@@ -43,26 +57,55 @@ service cloud.firestore {
     match /organizations/{organizationId} {
       allow create: if request.auth != null &&
         request.resource.data.ownerUid == request.auth.uid;
-      allow read: if isAdmin() ||
-        (request.auth != null &&
-          (resource.data.ownerUid == request.auth.uid ||
-            exists(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid))));
-      allow update, delete: if isAdmin() ||
-        (request.auth != null && resource.data.ownerUid == request.auth.uid);
+      allow read: if isAdmin() || ownsOrganization(organizationId) ||
+        isOrganizationMember(organizationId);
+      allow update: if isAdmin() ||
+        hasOrganizationPermission(organizationId, 'manageOrganization');
+      allow delete: if isAdmin() || ownsOrganization(organizationId);
 
       match /members/{memberId} {
-        allow read: if isAdmin() ||
-          (request.auth != null &&
-            (get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid ||
-              exists(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid))));
-        allow create: if request.auth != null &&
+        allow read: if isAdmin() || ownsOrganization(organizationId) ||
+          isOrganizationMember(organizationId);
+        allow create: if (request.auth != null &&
           request.resource.data.uid == memberId &&
-          (memberId == request.auth.uid &&
+          memberId == request.auth.uid &&
             request.resource.data.role == 'owner' &&
-            get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid);
+            ownsOrganization(organizationId)) ||
+          (hasOrganizationPermission(organizationId, 'manageMembers') &&
+            request.resource.data.role != 'owner');
         allow update, delete: if isAdmin() ||
-          (request.auth != null &&
-            get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid);
+          (hasOrganizationPermission(organizationId, 'manageMembers') &&
+            resource.data.role != 'owner');
+      }
+
+      match /learners/{learnerId} {
+        allow read: if isAdmin() || isOrganizationMember(organizationId);
+        allow create, update, delete: if isAdmin() ||
+          hasOrganizationPermission(organizationId, 'manageLearners');
+      }
+
+      match /teams/{teamId} {
+        allow read: if isAdmin() || isOrganizationMember(organizationId);
+        allow create, update, delete: if isAdmin() ||
+          hasOrganizationPermission(organizationId, 'manageTeams');
+      }
+
+      match /competitions/{competitionId} {
+        allow read: if isAdmin() || isOrganizationMember(organizationId);
+        allow create, update, delete: if isAdmin() ||
+          hasOrganizationPermission(organizationId, 'manageCompetitions');
+      }
+
+      match /invitations/{invitationId} {
+        allow read: if isAdmin() || isOrganizationMember(organizationId);
+        allow create, update, delete: if isAdmin() ||
+          hasOrganizationPermission(organizationId, 'manageMembers');
+      }
+
+      match /activity/{activityId} {
+        allow read: if isAdmin() || isOrganizationMember(organizationId);
+        allow create: if isAdmin() || isOrganizationMember(organizationId);
+        allow update, delete: if false;
       }
     }
 

@@ -6,6 +6,7 @@ import '../features/admin/presentation/admin_page.dart';
 import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/organization/presentation/organization_dashboard_page.dart';
+import '../features/organization/presentation/organization_management_page.dart';
 import '../features/pathway/presentation/pathway_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/rankings/presentation/rankings_page.dart';
@@ -68,6 +69,12 @@ final alliamRouter = GoRouter(
         GoRoute(
           path: '/organization',
           builder: (context, state) => const OrganizationDashboardPage(),
+        ),
+        GoRoute(
+          path: '/organization/:section',
+          builder: (context, state) => OrganizationManagementPage(
+            section: state.pathParameters['section']!,
+          ),
         ),
       ],
     ),

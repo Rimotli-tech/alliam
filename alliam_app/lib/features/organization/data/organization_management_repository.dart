@@ -1,0 +1,380 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class OrganizationMember {
+  const OrganizationMember({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.role,
+    required this.status,
+    required this.permissions,
+  });
+
+  final String id;
+  final String name;
+  final String email;
+  final String role;
+  final String status;
+  final Map<String, bool> permissions;
+
+  factory OrganizationMember.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationMember(
+      id: document.id,
+      name: data['displayName']?.toString() ?? '',
+      email: data['email']?.toString() ?? '',
+      role: data['role']?.toString() ?? 'staff',
+      status: data['status']?.toString() ?? 'active',
+      permissions: _permissions(data['permissions']),
+    );
+  }
+}
+
+class OrganizationLearner {
+  const OrganizationLearner({
+    required this.id,
+    required this.name,
+    required this.grade,
+    required this.status,
+  });
+
+  final String id;
+  final String name;
+  final String grade;
+  final String status;
+
+  factory OrganizationLearner.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationLearner(
+      id: document.id,
+      name: data['name']?.toString() ?? 'Learner',
+      grade: data['grade']?.toString() ?? '',
+      status: data['status']?.toString() ?? 'active',
+    );
+  }
+}
+
+class OrganizationTeam {
+  const OrganizationTeam({
+    required this.id,
+    required this.name,
+    required this.learnerIds,
+  });
+
+  final String id;
+  final String name;
+  final List<String> learnerIds;
+
+  factory OrganizationTeam.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationTeam(
+      id: document.id,
+      name: data['name']?.toString() ?? 'Team',
+      learnerIds: (data['learnerIds'] as List? ?? const [])
+          .map((value) => value.toString())
+          .toList(),
+    );
+  }
+}
+
+class OrganizationCompetition {
+  const OrganizationCompetition({
+    required this.id,
+    required this.name,
+    required this.status,
+    required this.participantOrganizationIds,
+  });
+
+  final String id;
+  final String name;
+  final String status;
+  final List<String> participantOrganizationIds;
+
+  factory OrganizationCompetition.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationCompetition(
+      id: document.id,
+      name: data['name']?.toString() ?? 'Competition',
+      status: data['status']?.toString() ?? 'draft',
+      participantOrganizationIds:
+          (data['participantOrganizationIds'] as List? ?? const [])
+              .map((value) => value.toString())
+              .toList(),
+    );
+  }
+}
+
+class OrganizationInvitation {
+  const OrganizationInvitation({
+    required this.id,
+    required this.email,
+    required this.kind,
+    required this.status,
+  });
+
+  final String id;
+  final String email;
+  final String kind;
+  final String status;
+
+  factory OrganizationInvitation.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationInvitation(
+      id: document.id,
+      email: data['email']?.toString() ?? '',
+      kind: data['kind']?.toString() ?? 'staff',
+      status: data['status']?.toString() ?? 'pending',
+    );
+  }
+}
+
+class OrganizationActivity {
+  const OrganizationActivity({required this.message, required this.createdAt});
+
+  final String message;
+  final DateTime? createdAt;
+
+  factory OrganizationActivity.fromDocument(
+    DocumentSnapshot<Map<String, dynamic>> document,
+  ) {
+    final data = document.data() ?? const <String, dynamic>{};
+    return OrganizationActivity(
+      message: data['message']?.toString() ?? '',
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+    );
+  }
+}
+
+class OrganizationManagementRepository {
+  const OrganizationManagementRepository(this.firestore);
+
+  final FirebaseFirestore firestore;
+
+  CollectionReference<Map<String, dynamic>> _collection(
+    String organizationId,
+    String name,
+  ) => firestore.collection('organizations/$organizationId/$name');
+
+  Stream<List<OrganizationMember>> watchMembers(String organizationId) =>
+      _collection(organizationId, 'members').snapshots().map(
+        (snapshot) =>
+            snapshot.docs.map(OrganizationMember.fromDocument).toList(),
+      );
+
+  Stream<List<OrganizationLearner>> watchLearners(String organizationId) =>
+      _collection(organizationId, 'learners')
+          .orderBy('name')
+          .snapshots()
+          .map(
+            (snapshot) =>
+                snapshot.docs.map(OrganizationLearner.fromDocument).toList(),
+          );
+
+  Stream<List<OrganizationTeam>> watchTeams(String organizationId) =>
+      _collection(organizationId, 'teams')
+          .orderBy('name')
+          .snapshots()
+          .map(
+            (snapshot) =>
+                snapshot.docs.map(OrganizationTeam.fromDocument).toList(),
+          );
+
+  Stream<List<OrganizationCompetition>> watchCompetitions(
+    String organizationId,
+  ) => _collection(organizationId, 'competitions')
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map(
+        (snapshot) =>
+            snapshot.docs.map(OrganizationCompetition.fromDocument).toList(),
+      );
+
+  Stream<List<OrganizationInvitation>> watchInvitations(
+    String organizationId,
+  ) => _collection(organizationId, 'invitations')
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map(
+        (snapshot) =>
+            snapshot.docs.map(OrganizationInvitation.fromDocument).toList(),
+      );
+
+  Stream<List<OrganizationActivity>> watchActivity(String organizationId) =>
+      _collection(organizationId, 'activity')
+          .orderBy('createdAt', descending: true)
+          .limit(12)
+          .snapshots()
+          .map(
+            (snapshot) =>
+                snapshot.docs.map(OrganizationActivity.fromDocument).toList(),
+          );
+
+  Future<void> addLearner({
+    required String organizationId,
+    required String name,
+    required String grade,
+    required String actorUid,
+  }) async {
+    final document = _collection(organizationId, 'learners').doc();
+    await document.set({
+      'id': document.id,
+      'name': name.trim(),
+      'grade': grade.trim(),
+      'status': 'active',
+      'createdBy': actorUid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _activity(organizationId, '$name was added to the learner roster.');
+  }
+
+  Future<void> setLearnerStatus({
+    required String organizationId,
+    required String learnerId,
+    required String status,
+  }) => _collection(organizationId, 'learners').doc(learnerId).update({
+    'status': status,
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+
+  Future<void> createTeam({
+    required String organizationId,
+    required String name,
+    required List<String> learnerIds,
+    required String actorUid,
+  }) async {
+    final document = _collection(organizationId, 'teams').doc();
+    await document.set({
+      'id': document.id,
+      'name': name.trim(),
+      'learnerIds': learnerIds,
+      'createdBy': actorUid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _activity(organizationId, 'Team $name was created.');
+  }
+
+  Future<void> updateTeamLearners({
+    required String organizationId,
+    required String teamId,
+    required List<String> learnerIds,
+  }) => _collection(organizationId, 'teams').doc(teamId).update({
+    'learnerIds': learnerIds,
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+
+  Future<void> invite({
+    required String organizationId,
+    required String email,
+    required String kind,
+    required String role,
+    required String actorUid,
+  }) async {
+    final document = _collection(organizationId, 'invitations').doc();
+    await document.set({
+      'id': document.id,
+      'email': email.trim().toLowerCase(),
+      'kind': kind,
+      'role': role,
+      'status': 'pending',
+      'organizationId': organizationId,
+      'invitedBy': actorUid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _activity(organizationId, 'Invitation sent to ${email.trim()}.');
+  }
+
+  Future<void> createCompetition({
+    required String organizationId,
+    required String name,
+    required String actorUid,
+  }) async {
+    final document = _collection(organizationId, 'competitions').doc();
+    await document.set({
+      'id': document.id,
+      'name': name.trim(),
+      'status': 'draft',
+      'hostOrganizationId': organizationId,
+      'participantOrganizationIds': [organizationId],
+      'createdBy': actorUid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await _activity(organizationId, 'Competition $name was created.');
+  }
+
+  Future<void> setCompetitionStatus({
+    required String organizationId,
+    required String competitionId,
+    required String status,
+  }) async {
+    await _collection(organizationId, 'competitions').doc(competitionId).update(
+      {'status': status, 'updatedAt': FieldValue.serverTimestamp()},
+    );
+    await _activity(organizationId, 'Competition moved to $status.');
+  }
+
+  Future<void> addParticipatingOrganization({
+    required String organizationId,
+    required String competitionId,
+    required String participantOrganizationId,
+  }) async {
+    await _collection(organizationId, 'competitions').doc(competitionId).update(
+      {
+        'participantOrganizationIds': FieldValue.arrayUnion([
+          participantOrganizationId.trim(),
+        ]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+    );
+    await _activity(
+      organizationId,
+      'A participating organisation was added to a competition.',
+    );
+  }
+
+  Future<void> setInvitationStatus({
+    required String organizationId,
+    required String invitationId,
+    required String status,
+  }) => _collection(organizationId, 'invitations').doc(invitationId).update({
+    'status': status,
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+
+  Future<void> updateMember({
+    required String organizationId,
+    required String memberId,
+    required String role,
+    required Map<String, bool> permissions,
+  }) => _collection(organizationId, 'members').doc(memberId).update({
+    'role': role,
+    'permissions': permissions,
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+
+  Future<void> _activity(String organizationId, String message) => _collection(
+    organizationId,
+    'activity',
+  ).add({'message': message, 'createdAt': FieldValue.serverTimestamp()});
+}
+
+Map<String, bool> _permissions(Object? value) {
+  if (value is! Map) return const {};
+  return {
+    for (final entry in value.entries)
+      entry.key.toString(): entry.value == true,
+  };
+}
