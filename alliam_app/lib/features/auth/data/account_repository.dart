@@ -18,29 +18,83 @@ class AccountRepository {
     final results = await Future.wait([
       _account(user.uid).get(),
       _state(user.uid).get(),
+      _firestore.collection('accounts/${user.uid}/learners').get(),
     ]);
-    final accountData = results[0].data() ?? const <String, dynamic>{};
-    final stateData = results[1].data() ?? const <String, dynamic>{};
+    final accountData =
+        (results[0] as DocumentSnapshot<Map<String, dynamic>>).data() ??
+        const <String, dynamic>{};
+    final stateData =
+        (results[1] as DocumentSnapshot<Map<String, dynamic>>).data() ??
+        const <String, dynamic>{};
+    final learnerDocuments = results[2] as QuerySnapshot<Map<String, dynamic>>;
     final value = _map(stateData['value']);
 
-    final role = _role(accountData['role'] ?? value['accountType']);
+    final accountRole = _role(accountData['role']);
+    final legacyRole = _role(value['accountType']);
+    final role =
+        accountRole == AccountRole.pending && legacyRole != AccountRole.pending
+        ? legacyRole
+        : accountRole;
     final owner = _map(value['accountOwner']);
     final school = _map(value['schoolAccount']);
-    final learners = _list(value['profiles'])
-        .map(LearnerProfile.fromMap)
-        .where((profile) => profile.id.isNotEmpty)
-        .toList();
+    final learnersById = <String, LearnerProfile>{};
+    for (final profile in _list(
+      value['profiles'],
+    ).map(LearnerProfile.fromMap).where((profile) => profile.id.isNotEmpty)) {
+      learnersById[profile.id] = profile;
+    }
+    for (final document in learnerDocuments.docs) {
+      final profile = LearnerProfile.fromMap({
+        ...document.data(),
+        'id': document.id,
+      });
+      if (profile.id.isNotEmpty) learnersById[profile.id] = profile;
+    }
+    final learners = learnersById.values.toList();
 
-    return AccountSession(
+    final session = AccountSession(
       role: role,
-      ownerName: _ownerName(owner, school, user),
+      ownerName: _ownerName(owner, school, accountData, user),
       ownerCountry: (owner['country'] ?? school['country'] ?? 'Nigeria')
           .toString(),
       schoolName: (school['name'] ?? accountData['schoolName'] ?? '')
           .toString(),
-      activeLearnerId: value['activeProfileId']?.toString(),
+      activeLearnerId:
+          (value['activeProfileId'] ?? accountData['activeLearnerId'])
+              ?.toString(),
       learners: learners,
     );
+    if (session.onboardingComplete &&
+        (accountData['schemaVersion'] as num?)?.round() != 2) {
+      await _migrateLegacy(user, session);
+    }
+    return session;
+  }
+
+  Future<void> _migrateLegacy(User user, AccountSession session) async {
+    final batch = _firestore.batch();
+    batch.set(_account(user.uid), {
+      'uid': user.uid,
+      'email': user.email,
+      'displayName': session.ownerName,
+      'role': session.role.name,
+      'schemaVersion': 2,
+      'activeLearnerId': session.activeLearnerId,
+      'schoolName': session.schoolName,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    for (final learner in session.learners) {
+      batch.set(
+        _firestore.doc('accounts/${user.uid}/learners/${learner.id}'),
+        {
+          ...learner.toMap(),
+          'accountId': user.uid,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    }
+    await batch.commit();
   }
 
   Future<void> completeStudent({
@@ -112,10 +166,16 @@ class AccountRepository {
   );
 
   Future<void> setActiveLearner(User user, String learnerId) async {
-    await _state(user.uid).set({
-      'value': {'activeProfileId': learnerId},
+    final batch = _firestore.batch();
+    batch.set(_account(user.uid), {
+      'activeLearnerId': learnerId,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    batch.set(_state(user.uid), {
+      'value.activeProfileId': learnerId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
   }
 
   Future<LearnerProfile> addLearner({
@@ -135,6 +195,12 @@ class AccountRepository {
       },
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await _firestore.doc('accounts/${user.uid}/learners/${learner.id}').set({
+      ...learner.toMap(),
+      'accountId': user.uid,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
     return learner;
   }
 
@@ -231,6 +297,8 @@ class AccountRepository {
       'email': user.email,
       'displayName': ownerName,
       'role': roleName,
+      'schemaVersion': 2,
+      'activeLearnerId': activeProfileId,
       'schoolName': schoolName,
       'updatedAt': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
@@ -256,6 +324,14 @@ class AccountRepository {
       },
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    for (final learner in profiles) {
+      batch.set(_firestore.doc('accounts/${user.uid}/learners/${learner.id}'), {
+        ...learner.toMap(),
+        'accountId': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
     await batch.commit();
     await user.updateDisplayName(ownerName);
   }
@@ -296,10 +372,12 @@ class AccountRepository {
   static String _ownerName(
     Map<String, dynamic> owner,
     Map<String, dynamic> school,
+    Map<String, dynamic> account,
     User user,
   ) {
     return (owner['name'] ??
             school['adminName'] ??
+            account['displayName'] ??
             user.displayName ??
             user.email?.split('@').first ??
             'Speller')

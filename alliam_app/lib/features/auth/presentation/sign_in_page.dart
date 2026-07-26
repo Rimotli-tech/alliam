@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
+import '../../../core/widgets/alliam_logo.dart';
 import '../data/account_repository.dart';
 
 class SignInPage extends StatefulWidget {
-  const SignInPage({super.key});
+  const SignInPage({super.key, this.openSignUp = false});
+
+  final bool openSignUp;
 
   @override
   State<SignInPage> createState() => _SignInPageState();
@@ -17,9 +20,24 @@ class _SignInPageState extends State<SignInPage> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
-  bool _creating = false;
+  late bool _creating;
   bool _busy = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _creating = widget.openSignUp;
+  }
+
+  @override
+  void didUpdateWidget(covariant SignInPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.openSignUp != widget.openSignUp) {
+      _creating = widget.openSignUp;
+      _error = null;
+    }
+  }
 
   @override
   void dispose() {
@@ -245,14 +263,7 @@ class _AuthBrand extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Alliam',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  const AlliamLogo(width: 112, color: Colors.white),
                   const Spacer(),
                   if (!compact)
                     Container(

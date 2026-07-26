@@ -1,5 +1,6 @@
 window.ALLIAM_CONFIG = {
   environment: "local",
+  appUrl: "https://alliam-app-ad3fd.web.app/#",
   firebase: {
     enabled: true,
     apiKey: "AIzaSyDHtwThqcN_IWOtGO6ko0q8ML8SmAV7olI",

@@ -36,7 +36,7 @@ class MatchPage extends StatefulWidget {
   State<MatchPage> createState() => _MatchPageState();
 }
 
-class _MatchPageState extends State<MatchPage> {
+class _MatchPageState extends State<MatchPage> with WidgetsBindingObserver {
   final _service = CompetitionService();
   final _audio = TrainingAudioService(
     FirebaseStorage.instance,
@@ -56,6 +56,9 @@ class _MatchPageState extends State<MatchPage> {
   String? _loadedWord;
   bool _submitting = false;
   bool _resultRecorded = false;
+  bool _leaving = false;
+  bool _allowPop = false;
+  Timer? _presenceTimer;
   DateTime _startedAt = DateTime.now();
 
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
@@ -63,17 +66,29 @@ class _MatchPageState extends State<MatchPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_start());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _presenceTimer?.cancel();
     _assignmentSubscription?.cancel();
     _roomSubscription?.cancel();
     _matchSubscription?.cancel();
     _audio.dispose();
     _focus.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final matchId = _matchId;
+    if (matchId == null || _match?.status != 'active') return;
+    unawaited(
+      _service.touchPresence(matchId, away: state != AppLifecycleState.resumed),
+    );
   }
 
   Future<void> _start() async {
@@ -131,6 +146,27 @@ class _MatchPageState extends State<MatchPage> {
     _matchSubscription = _service
         .watchMatch(matchId)
         .listen(_syncMatch, onError: (Object error) => _fail(error.toString()));
+    _presenceTimer?.cancel();
+    unawaited(_service.touchPresence(matchId));
+    _presenceTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+      unawaited(_heartbeat(matchId));
+    });
+  }
+
+  Future<void> _heartbeat(String matchId) async {
+    if (!mounted || _matchId != matchId || _match?.status == 'completed') {
+      return;
+    }
+    try {
+      await _service.touchPresence(matchId);
+      final match = _match;
+      if (match != null &&
+          match.opponentAppearsDisconnected(_uid, DateTime.now())) {
+        await _service.claimDisconnectedMatch(matchId);
+      }
+    } catch (_) {
+      // Presence is best-effort; the next heartbeat retries.
+    }
   }
 
   Future<void> _syncMatch(LiveMatch? match) async {
@@ -139,6 +175,7 @@ class _MatchPageState extends State<MatchPage> {
         _match == null || _match!.currentRound != match.currentRound;
     _match = match;
     if (match.status == 'completed') {
+      _presenceTimer?.cancel();
       setState(() => _phase = _MatchPhase.complete);
       unawaited(_recordResult(match));
       return;
@@ -236,6 +273,7 @@ class _MatchPageState extends State<MatchPage> {
   }
 
   Future<void> _leave() async {
+    if (_leaving) return;
     final active =
         _matchId != null &&
         _match?.status == 'active' &&
@@ -262,25 +300,32 @@ class _MatchPageState extends State<MatchPage> {
       ),
     );
     if (leave != true) return;
+    setState(() => _leaving = true);
     try {
-      if (active) {
-        await _service.forfeit(_matchId!);
-      } else if (widget.privateRoomCode == null) {
-        await _service.cancelQueue();
-      }
+      final cleanup = active
+          ? _service.forfeit(_matchId!)
+          : widget.privateRoomCode != null
+          ? _service.cancelPrivateRoom(widget.privateRoomCode!)
+          : _service.cancelQueue();
+      await cleanup.timeout(const Duration(seconds: 3));
     } catch (_) {
       // The route should remain escapable if the network disappears.
     }
     if (mounted) {
       unawaited(SoundEffectsService.instance.back());
-      context.go('/compete');
+      setState(() => _allowPop = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final navigator = Navigator.of(context);
+        navigator.canPop() ? navigator.pop() : context.go('/compete');
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _phase == _MatchPhase.complete,
+      canPop: _allowPop || _phase == _MatchPhase.complete,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) unawaited(_leave());
       },
@@ -330,9 +375,13 @@ class _MatchPageState extends State<MatchPage> {
             : 'Share this code. The match begins when your opponent joins.',
         loading: true,
         action: OutlinedButton(
-          onPressed: _leave,
+          onPressed: _leaving ? null : _leave,
           child: Text(
-            widget.privateRoomCode == null ? 'Cancel search' : 'Leave room',
+            _leaving
+                ? 'Leaving…'
+                : widget.privateRoomCode == null
+                ? 'Cancel search'
+                : 'Leave room',
           ),
         ),
       ),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
+import '../../../core/widgets/alliam_logo.dart';
 import '../data/account_repository.dart';
 import '../domain/account_session.dart';
 
@@ -506,13 +507,7 @@ class _OnboardingBrand extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Alliam',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            const AlliamLogo(width: 112, color: Colors.white),
             const Spacer(),
             if (!compact)
               Text(

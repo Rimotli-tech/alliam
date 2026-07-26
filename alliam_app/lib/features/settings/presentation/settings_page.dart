@@ -1,9 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/alliam_colors.dart';
+import '../../../core/audio/background_music_service.dart';
+import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/widgets/alliam_page.dart';
+import '../data/settings_repository.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -17,11 +21,52 @@ class _SettingsPageState extends State<SettingsPage> {
   bool motion = true;
   bool notifications = true;
   String level = 'Foundation';
+  Map<String, Map<String, dynamic>> _modules = const {};
+  bool _loading = true;
+  late final SettingsRepository _repository;
 
   User? get user => FirebaseAuth.instance.currentUser;
 
   @override
+  void initState() {
+    super.initState();
+    _repository = SettingsRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+    );
+    _load();
+  }
+
+  Future<void> _load() async {
+    final settings = await _repository.load();
+    if (!mounted) return;
+    setState(() {
+      level = settings.level;
+      sound = settings.sound;
+      motion = settings.motion;
+      notifications = settings.notifications;
+      _modules = settings.modules;
+      _loading = false;
+    });
+    SoundEffectsService.instance.setEnabled(settings.sound);
+    await BackgroundMusicService.instance.setEnabled(settings.sound);
+  }
+
+  Future<void> _save() => _repository.save(
+    AlliamSettings(
+      level: level,
+      sound: sound,
+      motion: motion,
+      notifications: notifications,
+      modules: _modules,
+    ),
+  );
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return AlliamPage(
       title: 'Settings',
       subtitle: 'Make Alliam yours',
@@ -53,14 +98,21 @@ class _SettingsPageState extends State<SettingsPage> {
                         child: Text('Championship'),
                       ),
                     ],
-                    onChanged: (value) =>
-                        setState(() => level = value ?? level),
+                    onChanged: (value) {
+                      setState(() => level = value ?? level);
+                      _save();
+                    },
                   ),
                   const SizedBox(height: 10),
                   SwitchListTile(
                     value: sound,
                     contentPadding: EdgeInsets.zero,
-                    onChanged: (value) => setState(() => sound = value),
+                    onChanged: (value) {
+                      setState(() => sound = value);
+                      SoundEffectsService.instance.setEnabled(value);
+                      BackgroundMusicService.instance.setEnabled(value);
+                      _save();
+                    },
                     title: const Text('Sound'),
                     subtitle: const Text('Pronunciation and feedback'),
                   ),
@@ -68,7 +120,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   SwitchListTile(
                     value: motion,
                     contentPadding: EdgeInsets.zero,
-                    onChanged: (value) => setState(() => motion = value),
+                    onChanged: (value) {
+                      setState(() => motion = value);
+                      _save();
+                    },
                     title: const Text('Motion'),
                     subtitle: const Text('Animations and visual payoff'),
                   ),
@@ -134,7 +189,10 @@ class _SettingsPageState extends State<SettingsPage> {
               child: SwitchListTile(
                 value: notifications,
                 contentPadding: EdgeInsets.zero,
-                onChanged: (value) => setState(() => notifications = value),
+                onChanged: (value) {
+                  setState(() => notifications = value);
+                  _save();
+                },
                 title: const Text('Activity alerts'),
                 subtitle: const Text('Matches, invitations, and rankings'),
               ),

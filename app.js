@@ -1157,10 +1157,10 @@
 
   async function handleAction(action,target){
     if(action==='landing-home'){navigate('landing');return;}
-    if(action==='landing-signin'){if(state.initialized&&services.firebase.user){navigate('home');return;}runtime.authMode='signin';navigate('auth');return;}
-    if(action==='landing-start'){if(state.initialized&&services.firebase.user){navigate('home');return;}runtime.authMode='signup';navigate('auth');return;}
-    if(action==='landing-train'){navigate(state.initialized?'train':'auth');return;}
-    if(action==='landing-compete'){navigate(state.initialized?'compete':'auth');return;}
+    if(action==='landing-signin'){window.location.assign(`${window.ALLIAM_CONFIG?.appUrl||'https://alliam-app-ad3fd.web.app/#'}/?mode=signin`);return;}
+    if(action==='landing-start'){window.location.assign(`${window.ALLIAM_CONFIG?.appUrl||'https://alliam-app-ad3fd.web.app/#'}/?mode=signup`);return;}
+    if(action==='landing-train'){window.location.assign(`${window.ALLIAM_CONFIG?.appUrl||'https://alliam-app-ad3fd.web.app/#'}/train`);return;}
+    if(action==='landing-compete'){window.location.assign(`${window.ALLIAM_CONFIG?.appUrl||'https://alliam-app-ad3fd.web.app/#'}/compete`);return;}
     if(action==='toggle-auth-mode'){runtime.authMode=runtime.authMode==='signin'?'signup':'signin';render();return;}
     if(action==='landing-menu'){document.querySelector('.landing-header')?.classList.toggle('menu-open');return;}
     if(action==='onboard-next'){

@@ -11,6 +11,8 @@ import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/audio/background_music_service.dart';
 import '../../../core/audio/sound_effects_service.dart';
+import '../../auth/data/account_repository.dart';
+import '../../settings/data/settings_repository.dart';
 import '../data/training_audio_service.dart';
 import '../data/training_progress_repository.dart';
 import '../data/word_repository.dart';
@@ -52,16 +54,24 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   int _secondsLeft = 20;
   int _lives = 3;
   int _streak = 0;
+  int _score = 0;
   int _activeSpellingLetter = -1;
   int _typedLength = 0;
   int _runId = 0;
   bool _showHeldWord = false;
+  bool _flashUsed = false;
   bool _lastCorrect = false;
+  String _learnerName = 'Speller';
   String _level = 'Foundation';
   int _wordCount = 5;
   Timer? _timer;
   String? _error;
   final Set<String> _incorrectWords = {};
+  final Set<int> _usedTileIndices = {};
+  final List<int> _usedTileOrder = [];
+  late final SettingsRepository _settings;
+  String _missingVariant = 'Multiple letters';
+  String _patternFocus = 'Automatic';
 
   SpellingWord? get _current =>
       _sessionWords.isEmpty ? null : _sessionWords[_index];
@@ -70,11 +80,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   void initState() {
     super.initState();
     _words = WordRepository(FirebaseFirestore.instance);
-    _audio = TrainingAudioService(
+    _audio = TrainingAudioService.shared(
       FirebaseStorage.instance,
       FirebaseFirestore.instance,
     );
     _progress = TrainingProgressRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+    );
+    _settings = SettingsRepository(
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
@@ -88,7 +102,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     unawaited(BackgroundMusicService.instance.leaveExercise());
     _answer.dispose();
     _focus.dispose();
-    _audio.dispose();
+    unawaited(_audio.stop());
     super.dispose();
   }
 
@@ -102,12 +116,28 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _error = null;
       _index = 0;
       _correct = 0;
+      _score = 0;
       _lives = 3;
       _streak = 0;
       _incorrectWords.clear();
     });
     try {
+      final preferences = await _settings.load();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final session = await AccountRepository(
+          FirebaseFirestore.instance,
+        ).load(user);
+        _learnerName = session.activeLearnerName.trim().split(' ').first;
+      }
+      final module = preferences.module(widget.mode.slug);
+      _level = module['level']?.toString() ?? preferences.level;
+      _wordCount = (module['wordCount'] as num?)?.round() ?? _wordCount;
+      _missingVariant = module['missingVariant']?.toString() ?? _missingVariant;
+      _patternFocus = module['patternFocus']?.toString() ?? _patternFocus;
       final words = await _words.load(level: _level, count: _wordCount);
+      if (!_valid(run)) return;
+      await _audio.prepareSession(words);
       if (!_valid(run)) return;
       setState(() => _sessionWords = words);
       await _prepareCurrent(firstWord: true, run: run);
@@ -127,6 +157,9 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     _typedLength = 0;
     _lastCorrect = false;
     _showHeldWord = false;
+    _flashUsed = false;
+    _usedTileIndices.clear();
+    _usedTileOrder.clear();
     setState(() {
       _phase = firstWord ? _SessionPhase.intro : _SessionPhase.teaching;
       _activeSpellingLetter = -1;
@@ -228,6 +261,12 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _phase = _SessionPhase.attempt;
       _activeSpellingLetter = -1;
     });
+    if ({
+      TrainingMode.similarWords,
+      TrainingMode.buildTheWord,
+    }.contains(widget.mode)) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focus.requestFocus();
@@ -264,7 +303,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   Future<void> _submit({bool timedOut = false}) async {
     if (_phase != _SessionPhase.attempt) return;
     _timer?.cancel();
-    final correct = !timedOut && _answer.text == _current!.word;
+    final correct = !timedOut && _answer.text.toLowerCase() == _expectedAnswer;
     if (correct) {
       _incorrectWords.remove(_current!.word);
       unawaited(SoundEffectsService.instance.correct());
@@ -275,6 +314,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     setState(() {
       _lastCorrect = correct;
       _correct += correct ? 1 : 0;
+      _score += correct ? 100 : 0;
       _streak = correct ? _streak + 1 : 0;
       if (!correct && widget.mode == TrainingMode.survivalRun) _lives--;
       _phase = _SessionPhase.feedback;
@@ -311,6 +351,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   Future<void> _openSettings() async {
     var level = _level;
     var count = _wordCount;
+    var missingVariant = _missingVariant;
+    var patternFocus = _patternFocus;
     final changed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -372,6 +414,62 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                     onChanged: (value) =>
                         setSheetState(() => count = value ?? count),
                   ),
+                  if (widget.mode == TrainingMode.missingLetters) ...[
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      initialValue: missingVariant,
+                      decoration: const InputDecoration(
+                        labelText: 'Missing letters',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'One letter',
+                          child: Text('One letter'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Multiple letters',
+                          child: Text('Multiple letters'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Vowels only',
+                          child: Text('Vowels only'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Difficult letters',
+                          child: Text('Difficult letters'),
+                        ),
+                      ],
+                      onChanged: (value) => setSheetState(
+                        () => missingVariant = value ?? missingVariant,
+                      ),
+                    ),
+                  ],
+                  if (widget.mode == TrainingMode.patternDrill) ...[
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      initialValue: patternFocus,
+                      decoration: const InputDecoration(labelText: 'Pattern'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'Automatic',
+                          child: Text('Automatic'),
+                        ),
+                        DropdownMenuItem(value: '-tion', child: Text('-tion')),
+                        DropdownMenuItem(value: '-sion', child: Text('-sion')),
+                        DropdownMenuItem(
+                          value: 'Silent letters',
+                          child: Text('Silent letters'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Double consonants',
+                          child: Text('Double consonants'),
+                        ),
+                      ],
+                      onChanged: (value) => setSheetState(
+                        () => patternFocus = value ?? patternFocus,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 22),
                   FilledButton(
                     onPressed: () => Navigator.pop(context, true),
@@ -387,8 +485,76 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     if (changed == true) {
       _level = level;
       _wordCount = count;
+      _missingVariant = missingVariant;
+      _patternFocus = patternFocus;
+      await _settings.saveModule(widget.mode.slug, {
+        'level': level,
+        'wordCount': count,
+        'missingVariant': missingVariant,
+        'patternFocus': patternFocus,
+      });
       await _loadSession();
     }
+  }
+
+  List<int> get _missingIndices {
+    final word = _current!.word;
+    if (_missingVariant == 'One letter') return [word.length ~/ 2];
+    if (_missingVariant == 'Vowels only') {
+      final values = <int>[
+        for (var index = 0; index < word.length; index++)
+          if ('aeiou'.contains(word[index])) index,
+      ];
+      return values.isEmpty ? [word.length ~/ 2] : values;
+    }
+    if (_missingVariant == 'Difficult letters') {
+      final values = <int>[
+        for (var index = 0; index < word.length; index++)
+          if ('cqxyzph'.contains(word[index])) index,
+      ];
+      return values.isEmpty ? [word.length ~/ 2] : values;
+    }
+    return [
+      for (var index = 0; index < word.length; index++)
+        if (index.isOdd) index,
+    ];
+  }
+
+  String get _patternTarget {
+    final word = _current!.word;
+    for (final ending in const [
+      'tion',
+      'sion',
+      'cian',
+      'ious',
+      'ance',
+      'ence',
+    ]) {
+      if (word.endsWith(ending)) return ending;
+    }
+    return word.substring((word.length - 3).clamp(0, word.length));
+  }
+
+  String get _expectedAnswer => switch (widget.mode) {
+    TrainingMode.missingLetters =>
+      _missingIndices.map((index) => _current!.word[index]).join(),
+    TrainingMode.patternDrill => _patternTarget,
+    _ => _current!.word,
+  };
+
+  String get _similarDistractor {
+    const known = {
+      'necessary': 'neccessary',
+      'separate': 'seperate',
+      'conscience': 'conscious',
+      'privilege': 'priviledge',
+      'pronunciation': 'pronounciation',
+      'beautiful': 'beautifull',
+      'mischievous': 'mischievious',
+      'rhythm': 'rythm',
+    };
+    return known[_current!.word] ??
+        '${_current!.word.substring(0, _current!.word.length - 1)}e';
   }
 
   @override
@@ -396,15 +562,31 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     return Scaffold(
       body: AlliamBackground(
         child: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              _header(context),
-              Expanded(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 320),
-                  child: _content(context),
-                ),
+              Column(
+                children: [
+                  _header(context),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 320),
+                      child: _content(context),
+                    ),
+                  ),
+                ],
               ),
+              if (_phase == _SessionPhase.attempt ||
+                  _phase == _SessionPhase.feedback)
+                Positioned(
+                  left: 18,
+                  bottom: 18,
+                  child: _SessionScore(
+                    key: ValueKey('score-$_score'),
+                    learnerName: _learnerName,
+                    score: _score,
+                    celebrate: _phase == _SessionPhase.feedback && _lastCorrect,
+                  ),
+                ),
             ],
           ),
         ),
@@ -651,7 +833,9 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
             constraints: const BoxConstraints(maxWidth: 980),
             child: Column(
               children: [
-                if (_phase == _SessionPhase.attempt)
+                if (_phase == _SessionPhase.attempt &&
+                    widget.mode != TrainingMode.similarWords &&
+                    widget.mode != TrainingMode.buildTheWord)
                   SizedBox(
                     width: 1,
                     height: 1,
@@ -701,27 +885,40 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                   ),
                 SizedBox(
                   height: 76,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
                     children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              color: AlliamColors.coral,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        feedback
-                            ? _lastCorrect
-                                  ? 'That spelling is correct.'
-                                  : 'The correct spelling is shown below.'
-                            : teaching
-                            ? 'Stay focused.'
-                            : 'Type the spelling, then submit.',
-                        textAlign: TextAlign.center,
+                      if (feedback && _lastCorrect)
+                        Positioned(
+                          top: -62,
+                          child: _SuccessCheck(
+                            key: ValueKey('success-check-$_index'),
+                          ),
+                        ),
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            title,
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(
+                                  color: AlliamColors.coral,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            feedback
+                                ? _lastCorrect
+                                      ? 'That spelling is correct.'
+                                      : 'The correct spelling is shown below.'
+                                : teaching
+                                ? 'Stay focused.'
+                                : 'Type the spelling, then submit.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -754,7 +951,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                   height: 250,
                   child: Center(
                     child: LetterDiamonds(
-                      word: _current!.word,
+                      word: _expectedAnswer,
                       entered: _answer.text,
                       revealWord: reveal,
                       success: feedback && _lastCorrect,
@@ -787,33 +984,71 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     );
     switch (widget.mode) {
       case TrainingMode.missingLetters:
+        final missing = _missingIndices.toSet();
         final masked = [
-          for (var i = 0; i < word.length; i++) i.isOdd ? '_' : word[i],
+          for (var i = 0; i < word.length; i++)
+            missing.contains(i) ? '_' : word[i],
         ].join(' ');
         return Text(masked, textAlign: TextAlign.center, style: style);
       case TrainingMode.patternDrill:
-        final length = word.length;
-        final pattern = word.substring(length > 4 ? length - 4 : 0);
-        return _ClueChip(
-          icon: Icons.pattern_rounded,
-          text: 'Pattern  $pattern',
+        final target = _patternTarget.toUpperCase();
+        final stem = word.substring(0, word.length - target.length);
+        return _PromptCard(
+          label: _patternFocus == 'Automatic'
+              ? 'Complete the pattern'
+              : _patternFocus,
+          text: '$stem _ _ _',
         );
       case TrainingMode.similarWords:
-        return _PromptCard(
-          label: 'Meaning',
-          text: _current!.definition.isEmpty
-              ? 'Choose the spelling that matches the word you hear.'
-              : _current!.definition,
+        return Column(
+          children: [
+            _PromptCard(
+              label: 'Meaning',
+              text: _current!.definition.isEmpty
+                  ? 'Choose the spelling that matches the word you hear.'
+                  : _current!.definition,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final option in [_current!.word, _similarDistractor])
+                  OutlinedButton(
+                    onPressed: _phase != _SessionPhase.attempt
+                        ? null
+                        : () {
+                            _answer.text = option;
+                            setState(() {});
+                            unawaited(_submit());
+                          },
+                    child: Text(option),
+                  ),
+              ],
+            ),
+          ],
         );
       case TrainingMode.buildTheWord:
-        final pieces = word.split('').reversed;
+        final pieces = word.split('').reversed.toList();
         return Wrap(
           alignment: WrapAlignment.center,
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final letter in pieces)
-              _ClueChip(icon: Icons.drag_indicator_rounded, text: letter),
+            for (var index = 0; index < pieces.length; index++)
+              OutlinedButton(
+                onPressed:
+                    _phase != _SessionPhase.attempt ||
+                        _usedTileIndices.contains(index)
+                    ? null
+                    : () {
+                        _usedTileIndices.add(index);
+                        _usedTileOrder.add(index);
+                        _answer.text += pieces[index].toLowerCase();
+                        setState(() {});
+                      },
+                child: Text(pieces[index]),
+              ),
           ],
         );
       case TrainingMode.themeChallenge:
@@ -862,25 +1097,45 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              OutlinedButton.icon(
-                onPressed: _answer.text.isEmpty
-                    ? null
-                    : () {
-                        final text = _answer.text;
-                        _answer.text = text.substring(0, text.length - 1);
-                        _answer.selection = TextSelection.collapsed(
-                          offset: _answer.text.length,
-                        );
-                        _typedLength = _answer.text.length;
-                        setState(() {});
-                        _focus.requestFocus();
-                      },
-                icon: const Icon(Icons.undo_rounded),
-                label: const Text('Undo'),
+              SizedBox(
+                width: 58,
+                height: 58,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    shape: const CircleBorder(),
+                  ),
+                  onPressed: _answer.text.isEmpty
+                      ? null
+                      : () {
+                          if (widget.mode == TrainingMode.buildTheWord &&
+                              _usedTileOrder.isNotEmpty) {
+                            _usedTileIndices.remove(
+                              _usedTileOrder.removeLast(),
+                            );
+                          }
+                          final text = _answer.text;
+                          _answer.text = text.substring(0, text.length - 1);
+                          _answer.selection = TextSelection.collapsed(
+                            offset: _answer.text.length,
+                          );
+                          _typedLength = _answer.text.length;
+                          setState(() {});
+                          _focus.requestFocus();
+                        },
+                  child: const Icon(Icons.undo_rounded),
+                ),
               ),
-              FilledButton(
-                onPressed: _answer.text.isEmpty ? null : _submit,
-                child: const Text('Submit'),
+              SizedBox(
+                width: 150,
+                height: 60,
+                child: FilledButton(
+                  onPressed: _answer.text.isEmpty ? null : _submit,
+                  child: const Text(
+                    'Submit',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                ),
               ),
             ],
           ),
@@ -898,14 +1153,26 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                 ),
                 if (widget.mode == TrainingMode.hearAndSpell)
                   Listener(
-                    onPointerDown: (_) => setState(() => _showHeldWord = true),
-                    onPointerUp: (_) => setState(() => _showHeldWord = false),
+                    onPointerDown: (_) {
+                      if (_flashUsed) return;
+                      setState(() {
+                        _flashUsed = true;
+                        _showHeldWord = true;
+                      });
+                    },
+                    onPointerUp: (_) {
+                      if (_showHeldWord) {
+                        setState(() => _showHeldWord = false);
+                      }
+                    },
                     onPointerCancel: (_) =>
                         setState(() => _showHeldWord = false),
-                    child: const IgnorePointer(
+                    child: IgnorePointer(
                       child: OutlinedButton(
-                        onPressed: null,
-                        child: Text('Hold to flash'),
+                        onPressed: _flashUsed ? null : () {},
+                        child: Text(
+                          _flashUsed ? 'Flash used' : 'Hold to flash',
+                        ),
                       ),
                     ),
                   ),
@@ -941,10 +1208,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     }
 
     if (feedback) {
-      return FilledButton(
-        onPressed: _next,
-        child: Text(
-          _index == _sessionWords.length - 1 ? 'View results' : 'Next word',
+      return SizedBox(
+        width: 164,
+        height: 60,
+        child: FilledButton(
+          onPressed: _next,
+          child: Text(
+            _index == _sessionWords.length - 1 ? 'View results' : 'Next word',
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
         ),
       );
     }
@@ -1221,6 +1493,147 @@ class _SessionIconButton extends StatelessWidget {
         color: AlliamColors.coral,
         iconSize: 21,
         icon: icon,
+      ),
+    );
+  }
+}
+
+class _SuccessCheck extends StatelessWidget {
+  const _SuccessCheck({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 680),
+      curve: Curves.elasticOut,
+      builder: (context, value, child) => Transform.rotate(
+        angle: (1 - value) * -0.22,
+        child: Transform.scale(scale: value, child: child),
+      ),
+      child: const Icon(
+        Icons.check_rounded,
+        color: AlliamColors.success,
+        size: 62,
+      ),
+    );
+  }
+}
+
+class _SessionScore extends StatelessWidget {
+  const _SessionScore({
+    required this.learnerName,
+    required this.score,
+    required this.celebrate,
+    super.key,
+  });
+
+  final String learnerName;
+  final int score;
+  final bool celebrate;
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = learnerName.trim().isEmpty
+        ? 'S'
+        : learnerName.trim()[0].toUpperCase();
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: celebrate ? 0.76 : 0.94, end: 1),
+      duration: const Duration(milliseconds: 620),
+      curve: Curves.elasticOut,
+      builder: (context, value, child) => Transform.scale(
+        scale: value,
+        alignment: Alignment.bottomLeft,
+        child: child,
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(7, 7, 12, 7),
+            decoration: BoxDecoration(
+              color: AlliamColors.surfaceStrong.withValues(alpha: 0.94),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: AlliamColors.line),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x24948D87),
+                  blurRadius: 28,
+                  offset: Offset(10, 16),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: AlliamColors.coral,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    initial,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Text(
+                  learnerName,
+                  style: const TextStyle(
+                    color: AlliamColors.text,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Text(
+                  '$score',
+                  style: const TextStyle(
+                    color: AlliamColors.success,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (celebrate) ...[
+            const Positioned(
+              right: -10,
+              top: -18,
+              child: Icon(
+                Icons.add_rounded,
+                color: AlliamColors.success,
+                size: 20,
+              ),
+            ),
+            const Positioned(
+              right: -24,
+              top: 2,
+              child: Icon(
+                Icons.add_rounded,
+                color: AlliamColors.success,
+                size: 14,
+              ),
+            ),
+            const Positioned(
+              right: -8,
+              bottom: -16,
+              child: Text(
+                '+100',
+                style: TextStyle(
+                  color: AlliamColors.success,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

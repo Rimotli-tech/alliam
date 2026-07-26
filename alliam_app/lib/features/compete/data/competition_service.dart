@@ -78,11 +78,23 @@ class CompetitionService {
 
   Future<void> cancelQueue() async => _call('cancelMatchQueue');
 
+  Future<void> cancelPrivateRoom(String code) async =>
+      _call('cancelPrivateRoom', {'code': code});
+
   Future<void> submitRound(String matchId, String attempt) async =>
       _call('submitMatchRound', {'matchId': matchId, 'attempt': attempt});
 
   Future<void> forfeit(String matchId) async =>
       _call('forfeitMatch', {'matchId': matchId});
+
+  Future<void> touchPresence(String matchId, {bool away = false}) async =>
+      _call('touchMatchPresence', {
+        'matchId': matchId,
+        'state': away ? 'away' : 'online',
+      });
+
+  Future<void> claimDisconnectedMatch(String matchId) async =>
+      _call('claimDisconnectedMatch', {'matchId': matchId});
 
   Future<String> createPrivateRoom() async {
     final result = await _call('createPrivateRoom');

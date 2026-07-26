@@ -5,6 +5,11 @@ class SoundEffectsService {
 
   static final instance = SoundEffectsService._();
   int _keyIndex = 0;
+  bool _enabled = true;
+
+  bool get enabled => _enabled;
+
+  void setEnabled(bool enabled) => _enabled = enabled;
 
   Future<void> startModule() =>
       _play('assets/audio/start-module.mp3', volume: 0.096);
@@ -28,10 +33,10 @@ class SoundEffectsService {
   Future<void> wordEntry() =>
       _play('assets/audio/word-entry.mp3', volume: 0.13);
 
-  Future<void> nextWord() =>
-      _play('assets/audio/next-word.mp3', volume: 0.14);
+  Future<void> nextWord() => _play('assets/audio/next-word.mp3', volume: 0.14);
 
   Future<void> _play(String asset, {required double volume}) async {
+    if (!_enabled) return;
     final player = AudioPlayer();
     try {
       await player.setAsset(asset);

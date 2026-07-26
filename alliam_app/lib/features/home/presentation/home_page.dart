@@ -10,6 +10,7 @@ import '../../../core/theme/alliam_colors.dart';
 import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/widgets/alliam_card.dart';
+import '../../../core/widgets/alliam_logo.dart';
 import '../../auth/data/account_repository.dart';
 import '../../auth/domain/account_session.dart';
 
@@ -37,14 +38,7 @@ class HomePage extends StatelessWidget {
                   Positioned(
                     left: 8,
                     top: 10,
-                    child: Text(
-                      'Alliam',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AlliamColors.coral,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    child: const AlliamLogo(width: 102),
                   ),
                   Positioned(
                     right: 12,
@@ -172,15 +166,17 @@ class HomePage extends StatelessWidget {
                                             context.go('/compete');
                                           },
                                         ),
-                                        const AlliamCard(
+                                        AlliamCard(
                                           icon: Icons.leaderboard_outlined,
                                           title: 'Rankings',
                                           subtitle: 'See your position',
+                                          onTap: () => context.go('/rankings'),
                                         ),
-                                        const AlliamCard(
+                                        AlliamCard(
                                           icon: Icons.groups_outlined,
                                           title: 'Friends & teams',
                                           subtitle: 'Spell together',
+                                          onTap: () => context.go('/social'),
                                         ),
                                         AlliamCard(
                                           icon: Icons.person_outline_rounded,

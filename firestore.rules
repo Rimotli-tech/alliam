@@ -6,7 +6,13 @@ service cloud.firestore {
     }
 
     match /accounts/{accountId} {
-      allow read, create, update, delete: if ownsAccount(accountId);
+      allow read, delete: if ownsAccount(accountId);
+      allow create: if ownsAccount(accountId) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.role in ['pending', 'student', 'parent', 'school'];
+      allow update: if ownsAccount(accountId) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.role in ['pending', 'student', 'parent', 'school'];
 
       match /{document=**} {
         allow read, write: if ownsAccount(accountId);
@@ -82,7 +88,10 @@ service cloud.firestore {
     }
 
     match /privateRooms/{code} {
-      allow read, write: if false;
+      allow read: if request.auth != null &&
+        (resource.data.ownerUid == request.auth.uid ||
+          resource.data.joinedUid == request.auth.uid);
+      allow write: if false;
     }
 
     match /{document=**} {

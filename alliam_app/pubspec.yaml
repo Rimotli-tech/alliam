@@ -48,6 +48,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
@@ -68,7 +70,9 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/branding/alliam-splash-logo.png
     - assets/audio/alliam-background.mp3
+    - assets/audio/letters/
     - assets/audio/start-module.mp3
     - assets/audio/correct-sound.mp3
     - assets/audio/back.mp3

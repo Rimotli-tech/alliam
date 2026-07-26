@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../audio/sound_effects_service.dart';
 import '../theme/alliam_colors.dart';
 import 'alliam_background.dart';
+import 'alliam_logo.dart';
 
 class AlliamPage extends StatelessWidget {
   const AlliamPage({
@@ -14,6 +15,7 @@ class AlliamPage extends StatelessWidget {
     required this.child,
     this.subtitle,
     this.showBack = true,
+    this.backLocation,
     super.key,
   });
 
@@ -21,6 +23,7 @@ class AlliamPage extends StatelessWidget {
   final String? subtitle;
   final Widget child;
   final bool showBack;
+  final String? backLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -41,20 +44,18 @@ class AlliamPage extends StatelessWidget {
                         tooltip: 'Back',
                         onPressed: () {
                           unawaited(SoundEffectsService.instance.back());
-                          context.canPop()
-                              ? context.pop()
-                              : context.go('/home');
+                          if (backLocation != null) {
+                            context.go(backLocation!);
+                          } else {
+                            context.canPop()
+                                ? context.pop()
+                                : context.go('/home');
+                          }
                         },
                         icon: const Icon(Icons.arrow_back_rounded),
                       )
                     else
-                      Text(
-                        'Alliam',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: AlliamColors.coral,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
+                      const AlliamLogo(width: 104),
                     const Spacer(),
                     PopupMenuButton<String>(
                       tooltip: 'Account',

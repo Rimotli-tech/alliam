@@ -9,7 +9,9 @@ import 'onboarding_page.dart';
 import 'sign_in_page.dart';
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key});
+  const AuthGate({super.key, this.openSignUp = false});
+
+  final bool openSignUp;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -29,7 +31,7 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
         final user = snapshot.data;
-        if (user == null) return const SignInPage();
+        if (user == null) return SignInPage(openSignUp: widget.openSignUp);
         return FutureBuilder<AccountSession>(
           key: ValueKey('${user.uid}-$_revision'),
           future: AccountRepository(FirebaseFirestore.instance).load(user),

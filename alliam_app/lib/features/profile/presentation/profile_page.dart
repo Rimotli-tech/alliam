@@ -82,7 +82,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _switchLearner(LearnerProfile learner) async {
     await _repository.setActiveLearner(_user, learner.id);
     if (!mounted) return;
-    setState(_reload);
+    setState(() => _reload());
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('${learner.name} is now active.')));
@@ -102,7 +102,7 @@ class _ProfilePageState extends State<ProfilePage> {
       country: session.ownerCountry,
       school: result.school,
     );
-    if (mounted) setState(_reload);
+    if (mounted) setState(() => _reload());
   }
 
   Future<void> _editOwner(AccountSession session) async {
@@ -155,7 +155,7 @@ class _ProfilePageState extends State<ProfilePage> {
             ? school.text.trim()
             : null,
       );
-      if (mounted) setState(_reload);
+      if (mounted) setState(() => _reload());
     }
     name.dispose();
     country.dispose();
@@ -197,6 +197,7 @@ class LearnerProfilePage extends StatelessWidget {
         return AlliamPage(
           title: learner.name,
           subtitle: '${learner.grade} · ${learner.country}',
+          backLocation: '/profile',
           child: Column(
             children: [
               _JourneySummary(learner: learner),

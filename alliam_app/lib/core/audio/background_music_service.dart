@@ -14,14 +14,15 @@ class BackgroundMusicService {
   final AudioPlayer _player = AudioPlayer();
   bool _prepared = false;
   bool _active = true;
+  bool _enabled = true;
   bool _exerciseActive = false;
   int _duckCount = 0;
   int _pauseCount = 0;
 
-  double get _restingVolume =>
-      _exerciseActive ? _duckedVolume : _normalVolume;
+  double get _restingVolume => _exerciseActive ? _duckedVolume : _normalVolume;
 
   Future<void> start() async {
+    if (!_enabled) return;
     if (!_prepared) {
       await _player.setAsset('assets/audio/alliam-background.mp3');
       await _player.setLoopMode(LoopMode.one);
@@ -76,6 +77,16 @@ class BackgroundMusicService {
     } else {
       await _player.pause();
     }
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    _enabled = enabled;
+    if (!enabled) {
+      if (_prepared) await _player.pause();
+      return;
+    }
+    await start();
+    if (_prepared) await _player.setVolume(_restingVolume);
   }
 
   Future<void> dispose() => _player.dispose();

@@ -910,6 +910,10 @@ async function createMatch(playerOne, playerTwo, mode = "Casual 1v1", extra = {}
     wordIds: words,
     scores: { [playerOne]: 0, [playerTwo]: 0 },
     submissions: {},
+    presence: {
+      [playerOne]: { state: "online", lastSeenAt: Date.now() },
+      [playerTwo]: { state: "online", lastSeenAt: Date.now() },
+    },
     winnerUid: null,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -949,10 +953,36 @@ exports.bootstrapPlayer = onCall({ region: AUDIO_REGION }, async (request) => {
 
 exports.sendFriendRequest = onCall({ region: AUDIO_REGION }, async (request) => {
   const senderUid = requireUser(request);
-  const code = cleanText(request.data?.friendCode, 20).toUpperCase();
-  const codeSnap = await db.doc(`friendCodes/${code}`).get();
-  if (!codeSnap.exists) throw new HttpsError("not-found", "No player has that friend code.");
-  const recipientUid = codeSnap.data().uid;
+  const identifier = cleanText(
+    request.data?.identifier || request.data?.friendCode,
+    160
+  );
+  let recipientUid;
+  if (identifier.includes("@")) {
+    try {
+      recipientUid = (await getAuth().getUserByEmail(identifier.toLowerCase())).uid;
+    } catch (_) {
+      throw new HttpsError("not-found", "No Alliam account uses that email.");
+    }
+  } else if (/^\+[\d\s()-]{7,}$/.test(identifier)) {
+    try {
+      recipientUid = (await getAuth().getUserByPhoneNumber(
+        identifier.replace(/[\s()-]/g, "")
+      )).uid;
+    } catch (_) {
+      throw new HttpsError("not-found", "No Alliam account uses that phone number.");
+    }
+  } else {
+    const code = identifier.toUpperCase();
+    const codeSnap = await db.doc(`friendCodes/${code}`).get();
+    if (!codeSnap.exists) {
+      throw new HttpsError(
+        "not-found",
+        "No player has that friend code. Try their email or international phone number."
+      );
+    }
+    recipientUid = codeSnap.data().uid;
+  }
   if (recipientUid === senderUid) throw new HttpsError("invalid-argument", "That is your own friend code.");
   const id = [senderUid, recipientUid].sort().join("_");
   const [sender, recipient] = await Promise.all([playerSnapshot(senderUid), playerSnapshot(recipientUid)]);
@@ -1038,6 +1068,7 @@ exports.joinMatchQueue = onCall({ region: AUDIO_REGION }, async (request) => {
   const uid = requireUser(request);
   await playerSnapshot(uid);
   const mode = cleanText(request.data?.mode || "Casual 1v1", 32);
+  await db.doc(`matchAssignments/${uid}`).delete();
   const waiting = await db.collection("matchQueue").where("status", "==", "waiting").limit(20).get();
   const opponent = waiting.docs.find((doc) => doc.id !== uid && doc.data().mode === mode);
   if (!opponent) {
@@ -1061,8 +1092,104 @@ exports.joinMatchQueue = onCall({ region: AUDIO_REGION }, async (request) => {
 
 exports.cancelMatchQueue = onCall({ region: AUDIO_REGION }, async (request) => {
   const uid = requireUser(request);
-  await db.doc(`matchQueue/${uid}`).delete();
+  const batch = db.batch();
+  batch.delete(db.doc(`matchQueue/${uid}`));
+  batch.delete(db.doc(`matchAssignments/${uid}`));
+  await batch.commit();
   return { cancelled: true };
+});
+
+exports.cancelPrivateRoom = onCall({ region: AUDIO_REGION }, async (request) => {
+  const uid = requireUser(request);
+  const code = cleanText(request.data?.code, 12).toUpperCase();
+  if (!code) throw new HttpsError("invalid-argument", "Room code is required.");
+  const ref = db.doc(`privateRooms/${code}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) return;
+    const room = snapshot.data();
+    if (room.ownerUid !== uid) {
+      throw new HttpsError("permission-denied", "Only the room owner can cancel it.");
+    }
+    if (room.status === "matched") {
+      throw new HttpsError("failed-precondition", "The room has already become a match.");
+    }
+    transaction.update(ref, {
+      status: "cancelled",
+      cancelledBy: uid,
+      cancelledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return { cancelled: true };
+});
+
+exports.touchMatchPresence = onCall({ region: AUDIO_REGION }, async (request) => {
+  const uid = requireUser(request);
+  const matchId = cleanText(request.data?.matchId, 160);
+  const state = request.data?.state === "away" ? "away" : "online";
+  const ref = db.doc(`matches/${matchId}`);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw new HttpsError("not-found", "Match not found.");
+    const match = snapshot.data();
+    if (!match.players.includes(uid)) {
+      throw new HttpsError("permission-denied", "This is not your match.");
+    }
+    if (match.status !== "active") return;
+    transaction.update(ref, {
+      [`presence.${uid}`]: { state, lastSeenAt: Date.now() },
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return { touched: true };
+});
+
+exports.claimDisconnectedMatch = onCall({ region: AUDIO_REGION }, async (request) => {
+  const uid = requireUser(request);
+  const matchId = cleanText(request.data?.matchId, 160);
+  const ref = db.doc(`matches/${matchId}`);
+  let disconnectedUid = null;
+  await db.runTransaction(async (transaction) => {
+    disconnectedUid = null;
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw new HttpsError("not-found", "Match not found.");
+    const match = snapshot.data();
+    if (!match.players.includes(uid)) {
+      throw new HttpsError("permission-denied", "This is not your match.");
+    }
+    if (match.status !== "active") return;
+    disconnectedUid = match.players.find((player) => player !== uid);
+    const lastSeen = Number(match.presence?.[disconnectedUid]?.lastSeenAt || 0);
+    if (Date.now() - lastSeen < 45000) {
+      throw new HttpsError("failed-precondition", "The opponent is still connected.");
+    }
+    transaction.update(ref, {
+      status: "completed",
+      completionReason: "disconnect",
+      forfeitedBy: disconnectedUid,
+      winnerUid: uid,
+      completedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  if (!disconnectedUid) return { completed: false };
+  const batch = db.batch();
+  batch.update(db.doc(`players/${uid}`), {
+    rating: FieldValue.increment(16),
+    matchCount: FieldValue.increment(1),
+    wins: FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.update(db.doc(`players/${disconnectedUid}`), {
+    rating: FieldValue.increment(-16),
+    matchCount: FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  batch.delete(db.doc(`matchAssignments/${uid}`));
+  batch.delete(db.doc(`matchAssignments/${disconnectedUid}`));
+  await batch.commit();
+  return { completed: true, disconnectedUid };
 });
 
 exports.forfeitMatch = onCall({ region: AUDIO_REGION }, async (request) => {
@@ -1099,6 +1226,8 @@ exports.forfeitMatch = onCall({ region: AUDIO_REGION }, async (request) => {
     wins: FieldValue.increment(1),
     updatedAt: FieldValue.serverTimestamp(),
   });
+  batch.delete(db.doc(`matchAssignments/${uid}`));
+  batch.delete(db.doc(`matchAssignments/${winnerUid}`));
   await batch.commit();
   return { forfeited: true, winnerUid, ratingDelta: -16 };
 });
@@ -1154,6 +1283,7 @@ exports.submitMatchRound = onCall({ region: AUDIO_REGION }, async (request) => {
         wins: FieldValue.increment(item.won ? 1 : 0),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      batch.delete(db.doc(`matchAssignments/${item.uid}`));
     }
     await batch.commit();
   }

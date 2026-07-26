@@ -1,5 +1,12 @@
 # alliam_app
 
+Platform-specific UI work must follow the
+[Alliam Platform UI Contract](docs/platform-ui-contract.md).
+
+The organiser product, competition workspace, and sponsorship roadmap are
+defined in
+[Competition Organisation](docs/competition-organisation.md).
+
 A new Flutter project.
 
 ## Getting Started

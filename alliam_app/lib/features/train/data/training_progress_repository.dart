@@ -18,6 +18,8 @@ class TrainingProgressRepository {
     final user = _auth.currentUser;
     if (user == null || attempted == 0) return;
     final reference = _firestore.doc('accounts/${user.uid}/data/app-state');
+    String? activeLearnerId;
+    Map<String, dynamic>? normalizedJourney;
 
     await _firestore.runTransaction((transaction) async {
       final snapshot = await transaction.get(reference);
@@ -25,6 +27,7 @@ class TrainingProgressRepository {
       final document = snapshot.data() ?? const <String, dynamic>{};
       final value = _map(document['value']);
       final activeProfileId = value['activeProfileId']?.toString();
+      activeLearnerId = activeProfileId;
       final profiles = _list(value['profiles']);
       final reviewWords = {
         ..._strings(value['reviewWords']),
@@ -48,6 +51,9 @@ class TrainingProgressRepository {
           'reviewWords': reviewWords.toList(),
           'lastMode': mode.label,
         };
+        normalizedJourney = Map<String, dynamic>.from(
+          profile['journey'] as Map,
+        );
         profiles[index] = profile;
         break;
       }
@@ -61,6 +67,29 @@ class TrainingProgressRepository {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     });
+
+    final learnerId = activeLearnerId;
+    if (learnerId == null) return;
+    final session = _firestore
+        .collection('accounts/${user.uid}/learners/$learnerId/sessions')
+        .doc();
+    final batch = _firestore.batch();
+    batch.set(session, {
+      'mode': mode.slug,
+      'correct': correct,
+      'attempted': attempted,
+      'incorrectWords': incorrectWords.toList(),
+      'completedAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(
+      _firestore.doc('accounts/${user.uid}/learners/$learnerId'),
+      {
+        'journey': normalizedJourney ?? const <String, dynamic>{},
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+    await batch.commit();
   }
 
   static Map<String, dynamic> _map(Object? value) =>

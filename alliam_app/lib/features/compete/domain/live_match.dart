@@ -25,6 +25,7 @@ class LiveMatch {
     required this.winnerUid,
     required this.completionReason,
     required this.forfeitedBy,
+    required this.presence,
   });
 
   final String id;
@@ -40,6 +41,7 @@ class LiveMatch {
   final String? winnerUid;
   final String? completionReason;
   final String? forfeitedBy;
+  final Map<String, MatchPresence> presence;
 
   String get currentWord => wordIds[currentRound.clamp(0, wordIds.length - 1)];
 
@@ -52,6 +54,13 @@ class LiveMatch {
 
   Map<String, dynamic>? submission(int round, String uid) =>
       submissions['${round}_$uid'];
+
+  bool opponentAppearsDisconnected(String uid, DateTime now) {
+    final opponent = opponentUid(uid);
+    final lastSeen = presence[opponent]?.lastSeenAt;
+    return lastSeen == null ||
+        now.difference(lastSeen) > const Duration(seconds: 45);
+  }
 
   factory LiveMatch.fromMap(String id, Map<String, dynamic> value) {
     final profiles = <String, MatchPlayer>{};
@@ -87,6 +96,7 @@ class LiveMatch {
       winnerUid: value['winnerUid']?.toString(),
       completionReason: value['completionReason']?.toString(),
       forfeitedBy: value['forfeitedBy']?.toString(),
+      presence: _presenceMap(value['presence']),
     );
   }
 
@@ -109,4 +119,28 @@ class LiveMatch {
       ),
     );
   }
+
+  static Map<String, MatchPresence> _presenceMap(Object? value) {
+    if (value is! Map) return {};
+    return value.map((key, item) {
+      final data = item is Map
+          ? Map<String, dynamic>.from(item)
+          : const <String, dynamic>{};
+      return MapEntry(
+        key.toString(),
+        MatchPresence(
+          state: data['state']?.toString() ?? 'online',
+          lastSeenAt: DateTime.fromMillisecondsSinceEpoch(
+            (data['lastSeenAt'] as num?)?.round() ?? 0,
+          ),
+        ),
+      );
+    });
+  }
+}
+
+class MatchPresence {
+  const MatchPresence({required this.state, required this.lastSeenAt});
+  final String state;
+  final DateTime lastSeenAt;
 }

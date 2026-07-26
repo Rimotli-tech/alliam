@@ -5,7 +5,9 @@ import '../features/auth/presentation/auth_gate.dart';
 import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/profile/presentation/profile_page.dart';
+import '../features/rankings/presentation/rankings_page.dart';
 import '../features/settings/presentation/settings_page.dart';
+import '../features/social/presentation/friends_teams_page.dart';
 import '../features/train/presentation/train_page.dart';
 import '../features/train/presentation/training_session_page.dart';
 import '../features/train/domain/training_mode.dart';
@@ -18,7 +20,11 @@ final alliamRouter = GoRouter(
     return null;
   },
   routes: [
-    GoRoute(path: '/', builder: (context, state) => const AuthGate()),
+    GoRoute(
+      path: '/',
+      builder: (context, state) =>
+          AuthGate(openSignUp: state.uri.queryParameters['mode'] == 'signup'),
+    ),
     GoRoute(path: '/home', builder: (context, state) => const HomePage()),
     GoRoute(path: '/train', builder: (context, state) => const TrainPage()),
     GoRoute(
@@ -28,6 +34,14 @@ final alliamRouter = GoRouter(
       ),
     ),
     GoRoute(path: '/compete', builder: (context, state) => const CompetePage()),
+    GoRoute(
+      path: '/rankings',
+      builder: (context, state) => const RankingsPage(),
+    ),
+    GoRoute(
+      path: '/social',
+      builder: (context, state) => const FriendsTeamsPage(),
+    ),
     GoRoute(path: '/profile', builder: (context, state) => const ProfilePage()),
     GoRoute(
       path: '/profile/learner/:id',
