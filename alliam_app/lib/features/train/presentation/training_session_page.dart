@@ -15,9 +15,11 @@ import '../../auth/data/account_repository.dart';
 import '../../settings/data/settings_repository.dart';
 import '../data/training_audio_service.dart';
 import '../data/training_progress_repository.dart';
+import '../data/session_audio_manifest.dart';
 import '../data/word_repository.dart';
 import '../domain/spelling_word.dart';
 import '../domain/training_mode.dart';
+import '../domain/learner_pathway.dart';
 import 'widgets/letter_diamonds.dart';
 
 enum _SessionPhase {
@@ -72,6 +74,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   late final SettingsRepository _settings;
   String _missingVariant = 'Multiple letters';
   String _patternFocus = 'Automatic';
+  TrainingSessionOutcome? _outcome;
+  bool _progressRecorded = false;
 
   SpellingWord? get _current =>
       _sessionWords.isEmpty ? null : _sessionWords[_index];
@@ -117,6 +121,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _index = 0;
       _correct = 0;
       _score = 0;
+      _outcome = null;
+      _progressRecorded = false;
       _lives = 3;
       _streak = 0;
       _incorrectWords.clear();
@@ -124,14 +130,18 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     try {
       final preferences = await _settings.load();
       final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
+      var pathwayLevel = preferences.level;
+      if (user != null && preferences.automaticPathway) {
         final session = await AccountRepository(
           FirebaseFirestore.instance,
         ).load(user);
         _learnerName = session.activeLearnerName.trim().split(' ').first;
+        pathwayLevel = LearnerPathway.stage(
+          session.activeLearner?.journey['stage']?.toString(),
+        ).wordLevel;
       }
       final module = preferences.module(widget.mode.slug);
-      _level = module['level']?.toString() ?? preferences.level;
+      _level = pathwayLevel;
       _wordCount = (module['wordCount'] as num?)?.round() ?? _wordCount;
       _missingVariant = module['missingVariant']?.toString() ?? _missingVariant;
       _patternFocus = module['patternFocus']?.toString() ?? _patternFocus;
@@ -323,13 +333,13 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
 
   Future<void> _next() async {
     if (widget.mode == TrainingMode.survivalRun && _lives <= 0) {
-      setState(() => _phase = _SessionPhase.complete);
       await _recordProgress();
+      if (mounted) setState(() => _phase = _SessionPhase.complete);
       return;
     }
     if (_index >= _sessionWords.length - 1) {
-      setState(() => _phase = _SessionPhase.complete);
       await _recordProgress();
+      if (mounted) setState(() => _phase = _SessionPhase.complete);
       return;
     }
     unawaited(SoundEffectsService.instance.nextWord());
@@ -338,18 +348,22 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   }
 
   Future<void> _recordProgress() async {
-    unawaited(
-      _progress.recordSession(
+    if (_progressRecorded) return;
+    _progressRecorded = true;
+    try {
+      final outcome = await _progress.recordSession(
         mode: widget.mode,
         correct: _correct,
         attempted: _index + 1,
         incorrectWords: _incorrectWords,
-      ),
-    );
+      );
+      if (mounted) setState(() => _outcome = outcome);
+    } catch (_) {
+      // Completion remains available offline; the session can be retried.
+    }
   }
 
   Future<void> _openSettings() async {
-    var level = _level;
     var count = _wordCount;
     var missingVariant = _missingVariant;
     var patternFocus = _patternFocus;
@@ -382,25 +396,13 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  DropdownButtonFormField<String>(
-                    initialValue: level,
-                    decoration: const InputDecoration(labelText: 'Word level'),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Foundation',
-                        child: Text('Foundation'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Builder',
-                        child: Text('Builder'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Championship',
-                        child: Text('Championship'),
-                      ),
-                    ],
-                    onChanged: (value) =>
-                        setSheetState(() => level = value ?? level),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.route_outlined),
+                    title: Text(_level),
+                    subtitle: const Text(
+                      'Word level follows the learner pathway',
+                    ),
                   ),
                   const SizedBox(height: 14),
                   DropdownButtonFormField<int>(
@@ -483,12 +485,10 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       },
     );
     if (changed == true) {
-      _level = level;
       _wordCount = count;
       _missingVariant = missingVariant;
       _patternFocus = patternFocus;
       await _settings.saveModule(widget.mode.slug, {
-        'level': level,
         'wordCount': count,
         'missingVariant': missingVariant,
         'patternFocus': patternFocus,
@@ -625,7 +625,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
 
   Widget _content(BuildContext context) {
     if (_phase == _SessionPhase.loading) {
-      return const Center(child: CircularProgressIndicator());
+      return _AudioPreparationPanel(audio: _audio);
     }
     if (_phase == _SessionPhase.error) {
       return _CenteredPanel(
@@ -1233,27 +1233,23 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   Widget _result(BuildContext context) {
     final attempted = (_index + 1).clamp(0, _sessionWords.length);
     final accuracy = attempted == 0 ? 0 : (_correct / attempted * 100).round();
-    return _CenteredPanel(
+    final outcome = _outcome;
+    final promoted = outcome?.promoted == true;
+    return _MilestonePayoff(
       key: const ValueKey('complete'),
-      title: '$accuracy% accuracy',
-      body: widget.mode == TrainingMode.streakChallenge
-          ? '$_correct correct · Best streak $_streak'
-          : '$_correct of $attempted words correct',
-      action: Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 12,
-        runSpacing: 12,
-        children: [
-          OutlinedButton(
-            onPressed: _loadSession,
-            child: const Text('Train again'),
-          ),
-          FilledButton(
-            onPressed: () => context.go('/train'),
-            child: const Text('Choose another mode'),
-          ),
-        ],
-      ),
+      title: promoted ? '${outcome!.stage.label} unlocked' : 'Session complete',
+      accuracy: accuracy,
+      correct: _correct,
+      attempted: attempted,
+      scoreEarned: outcome?.scoreEarned ?? _score,
+      stageLabel: outcome?.stage.label ?? _level,
+      stageProgress: outcome?.progress ?? 0,
+      stageSessions: outcome?.stageSessions ?? 0,
+      stageRequired: outcome?.stage.sessionsRequired ?? 5,
+      promoted: promoted,
+      bestStreak: widget.mode == TrainingMode.streakChallenge ? _streak : null,
+      onAgain: _loadSession,
+      onLeave: () => context.go('/train'),
     );
   }
 
@@ -1319,6 +1315,65 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         ),
       );
   }
+}
+
+class _AudioPreparationPanel extends StatelessWidget {
+  const _AudioPreparationPanel({required this.audio});
+
+  final TrainingAudioService audio;
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<SessionAudioPreparation>(
+    stream: audio.preparation,
+    initialData: audio.currentPreparation,
+    builder: (context, snapshot) {
+      final preparation = snapshot.data!;
+      final progress = preparation.total == 0
+          ? null
+          : preparation.progress.clamp(0.0, 1.0);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.graphic_eq_rounded,
+                  color: AlliamColors.coral,
+                  size: 42,
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Preparing your session',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: AlliamColors.coral,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Loading the words and audio you need.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AlliamColors.text),
+                ),
+                const SizedBox(height: 22),
+                LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 7,
+                  borderRadius: BorderRadius.circular(8),
+                  backgroundColor: AlliamColors.line,
+                  color: AlliamColors.coral,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _ClueChip extends StatelessWidget {
@@ -1639,12 +1694,165 @@ class _SessionScore extends StatelessWidget {
   }
 }
 
+class _MilestonePayoff extends StatelessWidget {
+  const _MilestonePayoff({
+    required this.title,
+    required this.accuracy,
+    required this.correct,
+    required this.attempted,
+    required this.scoreEarned,
+    required this.stageLabel,
+    required this.stageProgress,
+    required this.stageSessions,
+    required this.stageRequired,
+    required this.promoted,
+    required this.onAgain,
+    required this.onLeave,
+    this.bestStreak,
+    super.key,
+  });
+
+  final String title;
+  final int accuracy;
+  final int correct;
+  final int attempted;
+  final int scoreEarned;
+  final String stageLabel;
+  final double stageProgress;
+  final int stageSessions;
+  final int stageRequired;
+  final bool promoted;
+  final int? bestStreak;
+  final VoidCallback onAgain;
+  final VoidCallback onLeave;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.86, end: 1),
+        duration: const Duration(milliseconds: 650),
+        curve: Curves.easeOutBack,
+        builder: (context, scale, child) =>
+            Transform.scale(scale: scale, child: child),
+        child: Container(
+          width: 560,
+          padding: const EdgeInsets.fromLTRB(34, 32, 34, 30),
+          decoration: BoxDecoration(
+            color: AlliamColors.surfaceStrong.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: AlliamColors.line),
+            boxShadow: [
+              BoxShadow(
+                color: AlliamColors.success.withValues(alpha: 0.14),
+                blurRadius: 34,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: AlliamColors.success.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  promoted ? Icons.auto_awesome_rounded : Icons.check_rounded,
+                  size: 38,
+                  color: AlliamColors.success,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: promoted ? AlliamColors.success : AlliamColors.coral,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$correct of $attempted words · $accuracy% accuracy',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              if (bestStreak != null) ...[
+                const SizedBox(height: 6),
+                Text('Best streak $bestStreak'),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.add_circle_outline_rounded,
+                    color: AlliamColors.success,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$scoreEarned points',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AlliamColors.success,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 26),
+              Row(
+                children: [
+                  Text(
+                    stageLabel,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const Spacer(),
+                  Text('$stageSessions/$stageRequired sessions'),
+                ],
+              ),
+              const SizedBox(height: 9),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: LinearProgressIndicator(
+                  value: stageProgress,
+                  minHeight: 10,
+                  color: promoted ? AlliamColors.success : AlliamColors.coral,
+                  backgroundColor: AlliamColors.line,
+                ),
+              ),
+              const SizedBox(height: 28),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  OutlinedButton(
+                    onPressed: onAgain,
+                    child: const Text('Train again'),
+                  ),
+                  FilledButton(
+                    onPressed: onLeave,
+                    child: const Text('Continue journey'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _CenteredPanel extends StatelessWidget {
   const _CenteredPanel({
     required this.title,
     required this.body,
     required this.action,
-    super.key,
   });
 
   final String title;

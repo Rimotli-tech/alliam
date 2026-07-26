@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/auth/presentation/auth_gate.dart';
 import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
+import '../features/pathway/presentation/pathway_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/rankings/presentation/rankings_page.dart';
 import '../features/settings/presentation/settings_page.dart';
@@ -11,6 +12,7 @@ import '../features/social/presentation/friends_teams_page.dart';
 import '../features/train/presentation/train_page.dart';
 import '../features/train/presentation/training_session_page.dart';
 import '../features/train/domain/training_mode.dart';
+import '../core/widgets/responsive_navigation_shell.dart';
 
 final alliamRouter = GoRouter(
   initialLocation: '/',
@@ -26,31 +28,50 @@ final alliamRouter = GoRouter(
           AuthGate(openSignUp: state.uri.queryParameters['mode'] == 'signup'),
     ),
     GoRoute(path: '/home', builder: (context, state) => const HomePage()),
-    GoRoute(path: '/train', builder: (context, state) => const TrainPage()),
+    GoRoute(
+      path: '/pathway',
+      builder: (context, state) => const PathwayPage(),
+    ),
+    ShellRoute(
+      builder: (context, state, child) =>
+          ResponsiveNavigationShell(currentPath: state.uri.path, child: child),
+      routes: [
+        GoRoute(path: '/train', builder: (context, state) => const TrainPage()),
+        GoRoute(
+          path: '/compete',
+          builder: (context, state) => const CompetePage(),
+        ),
+        GoRoute(
+          path: '/rankings',
+          builder: (context, state) => const RankingsPage(),
+        ),
+        GoRoute(
+          path: '/social',
+          builder: (context, state) => const FriendsTeamsPage(),
+        ),
+        GoRoute(
+          path: '/profile',
+          builder: (context, state) => const ProfilePage(),
+          routes: [
+            GoRoute(
+              path: 'learner/:id',
+              builder: (context, state) => LearnerProfilePage(
+                learnerId: state.pathParameters['id'] ?? '',
+              ),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsPage(),
+        ),
+      ],
+    ),
     GoRoute(
       path: '/train/session/:mode',
       builder: (context, state) => TrainingSessionPage(
         mode: TrainingModeDetails.fromSlug(state.pathParameters['mode'] ?? ''),
       ),
-    ),
-    GoRoute(path: '/compete', builder: (context, state) => const CompetePage()),
-    GoRoute(
-      path: '/rankings',
-      builder: (context, state) => const RankingsPage(),
-    ),
-    GoRoute(
-      path: '/social',
-      builder: (context, state) => const FriendsTeamsPage(),
-    ),
-    GoRoute(path: '/profile', builder: (context, state) => const ProfilePage()),
-    GoRoute(
-      path: '/profile/learner/:id',
-      builder: (context, state) =>
-          LearnerProfilePage(learnerId: state.pathParameters['id'] ?? ''),
-    ),
-    GoRoute(
-      path: '/settings',
-      builder: (context, state) => const SettingsPage(),
     ),
   ],
 );

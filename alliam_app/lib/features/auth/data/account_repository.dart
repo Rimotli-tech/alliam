@@ -64,8 +64,10 @@ class AccountRepository {
               ?.toString(),
       learners: learners,
     );
+    final legacyProfileCount = _list(value['profiles']).length;
     if (session.onboardingComplete &&
-        (accountData['schemaVersion'] as num?)?.round() != 2) {
+        ((accountData['schemaVersion'] as num?)?.round() != 2 ||
+            legacyProfileCount != learners.length)) {
       await _migrateLegacy(user, session);
     }
     return session;
@@ -94,6 +96,13 @@ class AccountRepository {
         SetOptions(merge: true),
       );
     }
+    batch.set(_state(user.uid), {
+      'value.profiles': session.learners
+          .map((learner) => learner.toMap())
+          .toList(),
+      'value.activeProfileId': session.activeLearnerId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
     await batch.commit();
   }
 

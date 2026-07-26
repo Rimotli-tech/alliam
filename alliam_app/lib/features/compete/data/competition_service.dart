@@ -27,6 +27,27 @@ class CompetitionService {
 
   User get user => _auth.currentUser!;
 
+  Future<String?> activeMatchId() async {
+    final current = _auth.currentUser;
+    if (current == null || current.isAnonymous) return null;
+    final assignment = await _firestore
+        .doc('matchAssignments/${current.uid}')
+        .get();
+    final matchId = assignment.data()?['matchId']?.toString();
+    if (assignment.data()?['status'] != 'active' ||
+        matchId == null ||
+        matchId.isEmpty) {
+      return null;
+    }
+    final match = await _firestore.doc('matches/$matchId').get();
+    final data = match.data();
+    return match.exists &&
+            data?['status'] == 'active' &&
+            (data?['players'] as List?)?.contains(current.uid) == true
+        ? matchId
+        : null;
+  }
+
   Future<void> bootstrap(AccountSession session) async {
     final learner = session.activeLearner;
     if (learner == null) {
@@ -49,6 +70,17 @@ class CompetitionService {
         .doc('matchAssignments/${user.uid}')
         .get();
     final previous = assignment.data()?['matchId']?.toString();
+    if (assignment.data()?['status'] == 'active' &&
+        previous != null &&
+        previous.isNotEmpty) {
+      final existing = await _firestore.doc('matches/$previous').get();
+      final data = existing.data();
+      if (existing.exists &&
+          data?['status'] == 'active' &&
+          (data?['players'] as List?)?.contains(user.uid) == true) {
+        return QueueTicket(matchId: previous, previousAssignment: previous);
+      }
+    }
     final result = await _call('joinMatchQueue', {'mode': mode});
     return QueueTicket(
       matchId: result['matchId']?.toString(),

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../domain/training_mode.dart';
+import '../domain/learner_pathway.dart';
 
 class TrainingProgressRepository {
   TrainingProgressRepository(this._firestore, this._auth);
@@ -9,17 +10,18 @@ class TrainingProgressRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
 
-  Future<void> recordSession({
+  Future<TrainingSessionOutcome?> recordSession({
     required TrainingMode mode,
     required int correct,
     required int attempted,
     required Set<String> incorrectWords,
   }) async {
     final user = _auth.currentUser;
-    if (user == null || attempted == 0) return;
+    if (user == null || attempted == 0) return null;
     final reference = _firestore.doc('accounts/${user.uid}/data/app-state');
     String? activeLearnerId;
     Map<String, dynamic>? normalizedJourney;
+    TrainingSessionOutcome? outcome;
 
     await _firestore.runTransaction((transaction) async {
       final snapshot = await transaction.get(reference);
@@ -34,6 +36,7 @@ class TrainingProgressRepository {
         ...incorrectWords,
       };
       final accuracy = (correct / attempted * 100).round();
+      final scoreEarned = correct * 100;
 
       for (var index = 0; index < profiles.length; index++) {
         if (profiles[index]['id']?.toString() != activeProfileId) continue;
@@ -41,6 +44,24 @@ class TrainingProgressRepository {
         final journey = _map(profile['journey']);
         final sessions = _integer(journey['sessions']) + 1;
         final previousAccuracy = _integer(journey['accuracy']);
+        final currentStage = LearnerPathway.stage(journey['stage']?.toString());
+        var stageSessions = _integer(journey['stageSessions']) + 1;
+        final previousStageAccuracy = _integer(journey['stageAccuracy']);
+        var stageAccuracy =
+            (((previousStageAccuracy * (stageSessions - 1)) + accuracy) /
+                    stageSessions)
+                .round();
+        final nextStage = LearnerPathway.next(currentStage.id);
+        final promoted =
+            nextStage != null &&
+            stageSessions >= currentStage.sessionsRequired &&
+            stageAccuracy >= currentStage.accuracyRequired;
+        final resolvedStage = promoted ? nextStage : currentStage;
+        if (promoted) {
+          stageSessions = 0;
+          stageAccuracy = 0;
+        }
+        final totalScore = _integer(journey['totalScore']) + scoreEarned;
         profile['journey'] = {
           ...journey,
           'sessions': sessions,
@@ -50,18 +71,33 @@ class TrainingProgressRepository {
                   .round(),
           'reviewWords': reviewWords.toList(),
           'lastMode': mode.label,
+          'grade': profile['grade']?.toString() ?? 'Grade 1',
+          'stage': resolvedStage.id,
+          'stageLabel': resolvedStage.label,
+          'stageSessions': stageSessions,
+          'stageAccuracy': stageAccuracy,
+          'totalScore': totalScore,
+          'lastCompletedAt': DateTime.now().toUtc().toIso8601String(),
         };
         normalizedJourney = Map<String, dynamic>.from(
           profile['journey'] as Map,
         );
         profiles[index] = profile;
+        outcome = TrainingSessionOutcome(
+          scoreEarned: scoreEarned,
+          totalScore: totalScore,
+          stage: resolvedStage,
+          promoted: promoted,
+          stageSessions: stageSessions,
+          stageAccuracy: stageAccuracy,
+        );
         break;
       }
 
       value['profiles'] = profiles;
       value['reviewWords'] = reviewWords.toList();
       value['trainingSessions'] = _integer(value['trainingSessions']) + 1;
-      value['score'] = _integer(value['score']) + correct * 10;
+      value['score'] = _integer(value['score']) + scoreEarned;
       transaction.set(reference, {
         'value': value,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -69,7 +105,7 @@ class TrainingProgressRepository {
     });
 
     final learnerId = activeLearnerId;
-    if (learnerId == null) return;
+    if (learnerId == null) return outcome;
     final session = _firestore
         .collection('accounts/${user.uid}/learners/$learnerId/sessions')
         .doc();
@@ -79,6 +115,10 @@ class TrainingProgressRepository {
       'correct': correct,
       'attempted': attempted,
       'incorrectWords': incorrectWords.toList(),
+      'accuracy': (correct / attempted * 100).round(),
+      'scoreEarned': correct * 100,
+      'stage': outcome?.stage.id ?? 'foundation',
+      'promoted': outcome?.promoted ?? false,
       'completedAt': FieldValue.serverTimestamp(),
     });
     batch.set(
@@ -90,6 +130,7 @@ class TrainingProgressRepository {
       SetOptions(merge: true),
     );
     await batch.commit();
+    return outcome;
   }
 
   static Map<String, dynamic> _map(Object? value) =>

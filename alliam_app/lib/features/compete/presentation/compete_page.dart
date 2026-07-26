@@ -27,35 +27,61 @@ class CompetePage extends StatelessWidget {
     return AlliamPage(
       title: 'Choose an arena',
       subtitle: 'Pick a format and begin',
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columns = constraints.maxWidth < 620
-              ? 1
-              : constraints.maxWidth < 900
-              ? 2
-              : 3;
-          return GridView.builder(
-            itemCount: arenas.length,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: columns,
-              mainAxisSpacing: 18,
-              crossAxisSpacing: 18,
-              mainAxisExtent: 158,
-            ),
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemBuilder: (context, index) {
-              final arena = arenas[index];
-              return AlliamCard(
-                icon: arena.$1,
-                title: arena.$2,
-                subtitle: arena.$3,
-                variant: AlliamCardVariant.training,
-                onTap: () => _openArena(context, index),
+      child: Column(
+        children: [
+          FutureBuilder<String?>(
+            future: CompetitionService().activeMatchId(),
+            builder: (context, snapshot) {
+              final matchId = snapshot.data;
+              if (matchId == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => MatchPage(
+                        mode: 'Active match',
+                        initialMatchId: matchId,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.restore_rounded),
+                  label: const Text('Resume active match'),
+                ),
               );
             },
-          );
-        },
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth < 620
+                  ? 1
+                  : constraints.maxWidth < 900
+                  ? 2
+                  : 3;
+              return GridView.builder(
+                itemCount: arenas.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columns,
+                  mainAxisSpacing: 18,
+                  crossAxisSpacing: 18,
+                  mainAxisExtent: 158,
+                ),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemBuilder: (context, index) {
+                  final arena = arenas[index];
+                  return AlliamCard(
+                    icon: arena.$1,
+                    title: arena.$2,
+                    subtitle: arena.$3,
+                    variant: AlliamCardVariant.training,
+                    onTap: () => _openArena(context, index),
+                  );
+                },
+              );
+            },
+          ),
+        ],
       ),
     );
   }

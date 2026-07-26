@@ -7,6 +7,7 @@ import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_page.dart';
 import '../../auth/data/account_repository.dart';
 import '../../auth/domain/account_session.dart';
+import '../../train/domain/learner_pathway.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -407,12 +408,35 @@ class _LearningPath extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lastMode = learner.journey['lastMode']?.toString() ?? 'Hear & Spell';
+    final stage = LearnerPathway.stage(learner.journey['stage']?.toString());
+    final stageSessions =
+        (learner.journey['stageSessions'] as num?)?.round() ?? 0;
+    final progress = stage.sessionsRequired == 0
+        ? 1.0
+        : (stageSessions / stage.sessionsRequired).clamp(0.0, 1.0);
     final review = learner.journey['reviewWords'] is List
         ? List<String>.from(learner.journey['reviewWords'] as List)
         : const <String>[];
     return _ProfileSurface(
       child: Column(
         children: [
+          _PathRow(
+            icon: Icons.route_outlined,
+            title: '${learner.grade} · ${stage.label}',
+            body:
+                '$stageSessions of ${stage.sessionsRequired} pathway sessions',
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 9,
+              color: AlliamColors.coral,
+              backgroundColor: AlliamColors.line,
+            ),
+          ),
+          const Divider(height: 30),
           _PathRow(
             icon: Icons.fitness_center_rounded,
             title: 'Current focus',

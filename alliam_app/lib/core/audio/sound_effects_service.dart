@@ -6,10 +6,12 @@ class SoundEffectsService {
   static final instance = SoundEffectsService._();
   int _keyIndex = 0;
   bool _enabled = true;
+  double _volumeScale = 1;
 
   bool get enabled => _enabled;
 
   void setEnabled(bool enabled) => _enabled = enabled;
+  void setVolume(double value) => _volumeScale = value.clamp(0, 1);
 
   Future<void> startModule() =>
       _play('assets/audio/start-module.mp3', volume: 0.096);
@@ -40,7 +42,7 @@ class SoundEffectsService {
     final player = AudioPlayer();
     try {
       await player.setAsset(asset);
-      await player.setVolume(volume);
+      await player.setVolume(volume * _volumeScale);
       await player.play();
     } finally {
       await player.dispose();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/audio/background_music_service.dart';
 import '../../../core/audio/sound_effects_service.dart';
+import '../../train/data/training_audio_service.dart';
 import '../../../core/widgets/alliam_page.dart';
 import '../data/settings_repository.dart';
 
@@ -17,10 +20,16 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool sound = true;
+  bool music = true;
+  bool voice = true;
+  bool effects = true;
+  double musicVolume = 1;
+  double voiceVolume = 1;
+  double effectsVolume = 1;
   bool motion = true;
   bool notifications = true;
   String level = 'Foundation';
+  bool automaticPathway = true;
   Map<String, Map<String, dynamic>> _modules = const {};
   bool _loading = true;
   late final SettingsRepository _repository;
@@ -42,25 +51,47 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     setState(() {
       level = settings.level;
-      sound = settings.sound;
+      automaticPathway = settings.automaticPathway;
+      music = settings.music;
+      voice = settings.voice;
+      effects = settings.effects;
+      musicVolume = settings.musicVolume;
+      voiceVolume = settings.voiceVolume;
+      effectsVolume = settings.effectsVolume;
       motion = settings.motion;
       notifications = settings.notifications;
       _modules = settings.modules;
       _loading = false;
     });
-    SoundEffectsService.instance.setEnabled(settings.sound);
-    await BackgroundMusicService.instance.setEnabled(settings.sound);
+    _applyAudio();
   }
 
   Future<void> _save() => _repository.save(
     AlliamSettings(
       level: level,
-      sound: sound,
+      automaticPathway: automaticPathway,
+      music: music,
+      voice: voice,
+      effects: effects,
+      musicVolume: musicVolume,
+      voiceVolume: voiceVolume,
+      effectsVolume: effectsVolume,
       motion: motion,
       notifications: notifications,
       modules: _modules,
     ),
   );
+
+  void _applyAudio() {
+    SoundEffectsService.instance
+      ..setEnabled(effects)
+      ..setVolume(effectsVolume);
+    unawaited(
+      TrainingAudioService.configureVoice(enabled: voice, volume: voiceVolume),
+    );
+    unawaited(BackgroundMusicService.instance.setVolume(musicVolume));
+    unawaited(BackgroundMusicService.instance.setEnabled(music));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -79,44 +110,55 @@ class _SettingsPageState extends State<SettingsPage> {
               icon: Icons.fitness_center_rounded,
               child: Column(
                 children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: level,
-                    decoration: const InputDecoration(
-                      labelText: 'Learner pathway',
+                  SwitchListTile(
+                    value: automaticPathway,
+                    contentPadding: EdgeInsets.zero,
+                    secondary: const Icon(Icons.route_outlined),
+                    title: const Text('Automatic progression'),
+                    subtitle: const Text(
+                      'Progresses from Foundation to Builder and Champion',
                     ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Foundation',
-                        child: Text('Foundation'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Builder',
-                        child: Text('Builder'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Championship',
-                        child: Text('Championship'),
-                      ),
-                    ],
                     onChanged: (value) {
-                      setState(() => level = value ?? level);
+                      setState(() => automaticPathway = value);
                       _save();
                     },
+                  ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: automaticPathway
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            key: const ValueKey('manual-pathway'),
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: DropdownButtonFormField<String>(
+                              initialValue: level,
+                              decoration: const InputDecoration(
+                                labelText: 'Manual level',
+                                prefixIcon: Icon(Icons.tune_rounded),
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Foundation',
+                                  child: Text('Foundation'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Builder',
+                                  child: Text('Builder'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Championship',
+                                  child: Text('Champion'),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setState(() => level = value);
+                                _save();
+                              },
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 10),
-                  SwitchListTile(
-                    value: sound,
-                    contentPadding: EdgeInsets.zero,
-                    onChanged: (value) {
-                      setState(() => sound = value);
-                      SoundEffectsService.instance.setEnabled(value);
-                      BackgroundMusicService.instance.setEnabled(value);
-                      _save();
-                    },
-                    title: const Text('Sound'),
-                    subtitle: const Text('Pronunciation and feedback'),
-                  ),
-                  const Divider(),
                   SwitchListTile(
                     value: motion,
                     contentPadding: EdgeInsets.zero,
@@ -126,6 +168,61 @@ class _SettingsPageState extends State<SettingsPage> {
                     },
                     title: const Text('Motion'),
                     subtitle: const Text('Animations and visual payoff'),
+                  ),
+                ],
+              ),
+            ),
+            _SettingsSurface(
+              title: 'Audio',
+              icon: Icons.graphic_eq_rounded,
+              child: Column(
+                children: [
+                  _AudioControl(
+                    label: 'Music',
+                    enabled: music,
+                    volume: musicVolume,
+                    onEnabled: (value) {
+                      setState(() => music = value);
+                      _applyAudio();
+                      _save();
+                    },
+                    onVolume: (value) {
+                      setState(() => musicVolume = value);
+                      _applyAudio();
+                      _save();
+                    },
+                  ),
+                  const Divider(),
+                  _AudioControl(
+                    label: 'Voice',
+                    enabled: voice,
+                    volume: voiceVolume,
+                    onEnabled: (value) {
+                      setState(() => voice = value);
+                      _applyAudio();
+                      _save();
+                    },
+                    onVolume: (value) {
+                      setState(() => voiceVolume = value);
+                      _applyAudio();
+                      _save();
+                    },
+                  ),
+                  const Divider(),
+                  _AudioControl(
+                    label: 'Effects',
+                    enabled: effects,
+                    volume: effectsVolume,
+                    onEnabled: (value) {
+                      setState(() => effects = value);
+                      _applyAudio();
+                      _save();
+                    },
+                    onVolume: (value) {
+                      setState(() => effectsVolume = value);
+                      _applyAudio();
+                      _save();
+                    },
                   ),
                 ],
               ),
@@ -298,6 +395,43 @@ class _SettingsSurface extends StatelessWidget {
         Expanded(child: SingleChildScrollView(child: child)),
       ],
     ),
+  );
+}
+
+class _AudioControl extends StatelessWidget {
+  const _AudioControl({
+    required this.label,
+    required this.enabled,
+    required this.volume,
+    required this.onEnabled,
+    required this.onVolume,
+  });
+
+  final String label;
+  final bool enabled;
+  final double volume;
+  final ValueChanged<bool> onEnabled;
+  final ValueChanged<double> onVolume;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      SwitchListTile(
+        value: enabled,
+        contentPadding: EdgeInsets.zero,
+        title: Text(label),
+        onChanged: onEnabled,
+      ),
+      Row(
+        children: [
+          const Icon(Icons.volume_down_outlined, size: 18),
+          Expanded(
+            child: Slider(value: volume, onChanged: enabled ? onVolume : null),
+          ),
+          Text('${(volume * 100).round()}%'),
+        ],
+      ),
+    ],
   );
 }
 

@@ -414,6 +414,12 @@ class _MatchPageState extends State<MatchPage> with WidgetsBindingObserver {
     final opponentUid = match.opponentUid(_uid);
     final opponent = match.playerProfiles[opponentUid];
     final me = match.playerProfiles[_uid];
+    final opponentPresence = match.presence[opponentUid];
+    final opponentAway =
+        opponentPresence?.state == 'away' ||
+        (opponentPresence != null &&
+            DateTime.now().difference(opponentPresence.lastSeenAt) >
+                const Duration(seconds: 18));
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 54, 24, 40),
       child: Center(
@@ -435,6 +441,13 @@ class _MatchPageState extends State<MatchPage> with WidgetsBindingObserver {
                 opponentName: opponent?.name ?? 'Opponent',
                 opponentScore: match.scores[opponentUid] ?? 0,
               ),
+              if (opponentAway) ...[
+                const SizedBox(height: 12),
+                const _ConnectionNotice(
+                  text:
+                      'Opponent connection interrupted. Holding the match while they reconnect.',
+                ),
+              ],
               const SizedBox(height: 28),
               Text(
                 waiting ? 'Opponent spelling' : 'Your word',
@@ -517,11 +530,14 @@ class _MatchPageState extends State<MatchPage> with WidgetsBindingObserver {
     final draw = match.winnerUid == null && match.completionReason != 'forfeit';
     final won = match.winnerUid == _uid;
     final forfeit = match.completionReason == 'forfeit';
+    final disconnected = match.completionReason == 'disconnect';
     final heading = draw
         ? 'Draw'
         : won
         ? forfeit
               ? 'Opponent forfeited'
+              : disconnected
+              ? 'Opponent disconnected'
               : 'Victory'
         : forfeit
         ? 'Match forfeited'
@@ -756,6 +772,34 @@ class _WaitingForOpponent extends StatelessWidget {
         child: const LinearProgressIndicator(minHeight: 5),
       ),
     ],
+  );
+}
+
+class _ConnectionNotice extends StatelessWidget {
+  const _ConnectionNotice({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    decoration: BoxDecoration(
+      color: AlliamColors.coralSoft.withValues(alpha: 0.42),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: AlliamColors.line),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 15,
+          height: 15,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 10),
+        Flexible(child: Text(text)),
+      ],
+    ),
   );
 }
 

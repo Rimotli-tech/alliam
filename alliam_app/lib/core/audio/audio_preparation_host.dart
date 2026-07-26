@@ -39,6 +39,7 @@ class _AudioPreparationHostState extends State<AudioPreparationHost> {
   Future<void> _applySoundPreference() async {
     if (FirebaseAuth.instance.currentUser == null) {
       SoundEffectsService.instance.setEnabled(true);
+      await TrainingAudioService.configureVoice(enabled: true, volume: 1);
       await BackgroundMusicService.instance.setEnabled(true);
       return;
     }
@@ -46,8 +47,15 @@ class _AudioPreparationHostState extends State<AudioPreparationHost> {
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     ).load();
-    SoundEffectsService.instance.setEnabled(settings.sound);
-    await BackgroundMusicService.instance.setEnabled(settings.sound);
+    SoundEffectsService.instance
+      ..setEnabled(settings.effects)
+      ..setVolume(settings.effectsVolume);
+    await TrainingAudioService.configureVoice(
+      enabled: settings.voice,
+      volume: settings.voiceVolume,
+    );
+    await BackgroundMusicService.instance.setVolume(settings.musicVolume);
+    await BackgroundMusicService.instance.setEnabled(settings.music);
   }
 
   @override

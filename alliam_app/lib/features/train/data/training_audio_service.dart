@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../core/audio/background_music_service.dart';
-import '../../../core/audio/sound_effects_service.dart';
 import '../domain/spelling_word.dart';
 import 'bundled_alphabet_manifest.dart';
 import 'sequential_letter_playback.dart';
@@ -16,6 +15,23 @@ import 'word_audio_cache.dart';
 
 class TrainingAudioService {
   static TrainingAudioService? _sharedInstance;
+  static bool voiceEnabled = true;
+  static double voiceVolume = 1;
+
+  static Future<void> configureVoice({
+    required bool enabled,
+    required double volume,
+  }) async {
+    voiceEnabled = enabled;
+    voiceVolume = volume.clamp(0, 1);
+    if (!enabled) {
+      await _sharedInstance?._wordPlayer.stop();
+      await _sharedInstance?._letterPlayer.stop();
+    } else {
+      await _sharedInstance?._wordPlayer.setVolume(voiceVolume);
+      await _sharedInstance?._letterPlayer.setVolume(voiceVolume);
+    }
+  }
 
   static TrainingAudioService shared(
     FirebaseStorage storage,
@@ -162,10 +178,15 @@ class TrainingAudioService {
 
     if (words.isEmpty) return _sessionManifest;
 
-    await _prepareEntry(
+    final firstWordReady = await _prepareEntry(
       _sessionManifest.entries.first,
       generation,
     ).timeout(firstWordTimeout, onTimeout: () => false);
+    if (!firstWordReady && voiceEnabled) {
+      throw StateError(
+        'The first word audio could not be prepared. Check your connection and try again.',
+      );
+    }
 
     if (generation == _sessionGeneration && !_disposed) {
       unawaited(_prepareRemaining(generation));
@@ -236,7 +257,7 @@ class TrainingAudioService {
   }
 
   Future<void> play(AudioAsset? asset) async {
-    if (!SoundEffectsService.instance.enabled ||
+    if (!voiceEnabled ||
         asset == null ||
         asset.storagePath.isEmpty ||
         _disposed) {
@@ -247,6 +268,7 @@ class TrainingAudioService {
     try {
       await _setWordSource(asset.storagePath);
       await _wordPlayer.seek(Duration.zero);
+      await _wordPlayer.setVolume(voiceVolume);
       await _wordPlayer.play();
     } finally {
       await BackgroundMusicService.instance.restore();
@@ -274,7 +296,7 @@ class TrainingAudioService {
     String word, {
     required void Function(int index) onLetter,
   }) async {
-    if (!SoundEffectsService.instance.enabled) return;
+    if (!voiceEnabled) return;
     await prepareAppAudio();
     final generation = _sessionGeneration;
     await BackgroundMusicService.instance.duck();
@@ -311,6 +333,7 @@ class TrainingAudioService {
       );
     }
     await _letterPlayer.seek(Duration.zero);
+    await _letterPlayer.setVolume(voiceVolume);
     await _letterPlayer.play();
   }
 

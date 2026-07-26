@@ -44,10 +44,10 @@ class HomePage extends StatelessWidget {
                     right: 12,
                     top: 6,
                     child: IconButton(
-                      tooltip: 'Notifications',
-                      onPressed: () {},
+                      tooltip: 'Profile',
+                      onPressed: () => context.go('/profile'),
                       icon: const Icon(
-                        Icons.notifications_none_rounded,
+                        Icons.person_outline_rounded,
                         color: AlliamColors.coral,
                         size: 20,
                       ),
@@ -143,15 +143,15 @@ class HomePage extends StatelessWidget {
                                       childAspectRatio: cardWidth / cardHeight,
                                       children: [
                                         AlliamCard(
-                                          icon: Icons.fitness_center_rounded,
-                                          title: 'Train',
-                                          subtitle: 'Build your spelling',
+                                          icon: Icons.route_rounded,
+                                          title: 'Pathway',
+                                          subtitle: 'Continue your journey',
                                           onTap: () {
                                             unawaited(
                                               SoundEffectsService.instance
                                                   .startModule(),
                                             );
-                                            context.go('/train');
+                                            context.go('/pathway');
                                           },
                                         ),
                                         AlliamCard(
@@ -167,34 +167,28 @@ class HomePage extends StatelessWidget {
                                           },
                                         ),
                                         AlliamCard(
+                                          icon: Icons.fitness_center_rounded,
+                                          title: 'Train',
+                                          subtitle: 'Choose a practice mode',
+                                          onTap: () {
+                                            unawaited(
+                                              SoundEffectsService.instance
+                                                  .startModule(),
+                                            );
+                                            context.go('/train');
+                                          },
+                                        ),
+                                        AlliamCard(
                                           icon: Icons.leaderboard_outlined,
                                           title: 'Rankings',
                                           subtitle: 'See your position',
                                           onTap: () => context.go('/rankings'),
                                         ),
                                         AlliamCard(
-                                          icon: Icons.groups_outlined,
+                                          icon: Icons.groups_2_outlined,
                                           title: 'Friends & teams',
                                           subtitle: 'Spell together',
                                           onTap: () => context.go('/social'),
-                                        ),
-                                        AlliamCard(
-                                          icon: Icons.person_outline_rounded,
-                                          title:
-                                              session.role == AccountRole.parent
-                                              ? 'Family'
-                                              : session.role ==
-                                                    AccountRole.school
-                                              ? 'School'
-                                              : 'Profile',
-                                          subtitle:
-                                              session.role == AccountRole.parent
-                                              ? 'Manage learners'
-                                              : session.role ==
-                                                    AccountRole.school
-                                              ? 'Manage your school'
-                                              : 'Your progress',
-                                          onTap: () => context.go('/profile'),
                                         ),
                                         AlliamCard(
                                           icon: Icons.settings_outlined,

@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
-import '../../home/presentation/home_page.dart';
 import '../data/account_repository.dart';
 import '../domain/account_session.dart';
 import 'onboarding_page.dart';
@@ -50,7 +50,12 @@ class _AuthGateState extends State<AuthGate> {
                 onComplete: () => setState(() => _revision++),
               );
             }
-            return const HomePage();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) context.go('/pathway');
+            });
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
           },
         );
       },

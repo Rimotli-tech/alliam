@@ -18,8 +18,10 @@ class BackgroundMusicService {
   bool _exerciseActive = false;
   int _duckCount = 0;
   int _pauseCount = 0;
+  double _volumeScale = 1;
 
-  double get _restingVolume => _exerciseActive ? _duckedVolume : _normalVolume;
+  double get _restingVolume =>
+      (_exerciseActive ? _duckedVolume : _normalVolume) * _volumeScale;
 
   Future<void> start() async {
     if (!_enabled) return;
@@ -30,7 +32,12 @@ class BackgroundMusicService {
       _prepared = true;
     }
     if (_active && _pauseCount == 0 && !_player.playing) {
-      unawaited(_player.play());
+      unawaited(
+        _player.play().catchError((_) {
+          // Browsers can reject autoplay before the first user gesture.
+          // BackgroundMusicHost retries on the next pointer interaction.
+        }),
+      );
     }
   }
 
@@ -66,7 +73,13 @@ class BackgroundMusicService {
     _pauseCount = 0;
     if (!_prepared) return;
     await _player.setVolume(_normalVolume);
-    if (_active && !_player.playing) unawaited(_player.play());
+    if (_active && !_player.playing) {
+      unawaited(
+        _player.play().catchError((_) {
+          // Web playback resumes after the next user interaction.
+        }),
+      );
+    }
   }
 
   Future<void> setAppActive(bool active) async {
@@ -86,6 +99,11 @@ class BackgroundMusicService {
       return;
     }
     await start();
+    if (_prepared) await _player.setVolume(_restingVolume);
+  }
+
+  Future<void> setVolume(double value) async {
+    _volumeScale = value.clamp(0, 1);
     if (_prepared) await _player.setVolume(_restingVolume);
   }
 
