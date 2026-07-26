@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
@@ -32,50 +31,47 @@ class AdminLearner {
   final String grade;
 }
 
+class AdminOverview {
+  const AdminOverview({required this.words, required this.learners});
+
+  final List<AdminWordAudio> words;
+  final List<AdminLearner> learners;
+}
+
 class AdminService {
   AdminService()
-    : _firestore = FirebaseFirestore.instance,
-      _functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
+    : _functions = FirebaseFunctions.instanceFor(region: 'europe-west1');
 
-  final FirebaseFirestore _firestore;
   final FirebaseFunctions _functions;
 
-  Future<List<AdminWordAudio>> loadWords() async {
-    final snapshot = await _firestore.collection('words').get();
-    final words = snapshot.docs.map((document) {
-      final data = document.data();
-      final audio = data['audio'] is Map
-          ? Map<String, dynamic>.from(data['audio'] as Map)
-          : const <String, dynamic>{};
-      final pronunciation = audio['pronunciation'] is Map
-          ? Map<String, dynamic>.from(audio['pronunciation'] as Map)
-          : const <String, dynamic>{};
+  Future<AdminOverview> loadOverview() async {
+    final result = await _functions
+        .httpsCallable('getAdminOverview')
+        .call<Map<dynamic, dynamic>>()
+        .timeout(const Duration(seconds: 30));
+    final data = Map<String, dynamic>.from(result.data);
+    final words = (data['words'] as List<dynamic>? ?? const []).map((value) {
+      final item = Map<String, dynamic>.from(value as Map);
       return AdminWordAudio(
-        id: document.id,
-        word: data['word']?.toString() ?? document.id,
-        level: data['level']?.toString() ?? 'Unassigned',
-        storagePath: pronunciation['storagePath']?.toString() ?? '',
-        approved: data['approved'] == true,
+        id: item['id']?.toString() ?? '',
+        word: item['word']?.toString() ?? '',
+        level: item['level']?.toString() ?? 'Unassigned',
+        storagePath: item['storagePath']?.toString() ?? '',
+        approved: item['approved'] == true,
       );
     }).toList()..sort((a, b) => a.word.compareTo(b.word));
-    return words;
-  }
-
-  Future<List<AdminLearner>> loadLearners() async {
-    final snapshot = await _firestore.collectionGroup('learners').get();
-    final learners = snapshot.docs.map((document) {
-      final data = document.data();
+    final learners = (data['learners'] as List<dynamic>? ?? const []).map((
+      value,
+    ) {
+      final item = Map<String, dynamic>.from(value as Map);
       return AdminLearner(
-        accountId:
-            data['accountId']?.toString() ?? document.reference.parent.parent!.id,
-        id: document.id,
-        name:
-            (data['nickname'] ?? data['displayName'] ?? data['name'] ?? 'Speller')
-                .toString(),
-        grade: data['grade']?.toString() ?? 'Grade 1',
+        accountId: item['accountId']?.toString() ?? '',
+        id: item['id']?.toString() ?? '',
+        name: item['name']?.toString() ?? 'Speller',
+        grade: item['grade']?.toString() ?? 'Grade 1',
       );
     }).toList()..sort((a, b) => a.name.compareTo(b.name));
-    return learners;
+    return AdminOverview(words: words, learners: learners);
   }
 
   Future<String> audioUrl(String storagePath) =>

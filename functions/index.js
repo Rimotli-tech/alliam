@@ -1389,6 +1389,36 @@ exports.bootstrapAdminRole = onCall({ region: AUDIO_REGION }, async (request) =>
   return { admin: true };
 });
 
+exports.getAdminOverview = onCall({ region: AUDIO_REGION }, async (request) => {
+  requireAdmin(request);
+  const db = getFirestore();
+  const [wordSnapshot, learnerSnapshot] = await Promise.all([
+    db.collection("words").get(),
+    db.collectionGroup("learners").get(),
+  ]);
+  return {
+    words: wordSnapshot.docs.map((document) => {
+      const data = document.data();
+      return {
+        id: document.id,
+        word: String(data.word || document.id),
+        level: String(data.level || "Unassigned"),
+        storagePath: String(data.audio?.pronunciation?.storagePath || ""),
+        approved: data.approved === true,
+      };
+    }),
+    learners: learnerSnapshot.docs.map((document) => {
+      const data = document.data();
+      return {
+        accountId: String(data.accountId || document.ref.parent.parent.id),
+        id: document.id,
+        name: String(data.nickname || data.displayName || data.name || "Speller"),
+        grade: String(data.grade || "Grade 1"),
+      };
+    }),
+  };
+});
+
 exports.approveWordAudio = onCall({ region: AUDIO_REGION }, async (request) => {
   requireAdmin(request);
   const wordId = String(request.data?.wordId || "").trim().toLowerCase();

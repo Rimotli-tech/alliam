@@ -22,6 +22,7 @@ class _AdminPageState extends State<AdminPage> {
   bool _loading = true;
   int _section = 0;
   String? _busyId;
+  String? _loadError;
 
   @override
   void initState() {
@@ -37,17 +38,38 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Future<void> _reload() async {
-    if (mounted) setState(() => _loading = true);
-    final results = await Future.wait([
-      _service.loadWords(),
-      _service.loadLearners(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _words = results[0] as List<AdminWordAudio>;
-      _learners = results[1] as List<AdminLearner>;
-      _loading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
+    try {
+      final overview = await _service.loadOverview();
+      if (!mounted) return;
+      setState(() {
+        _words = overview.words;
+        _learners = overview.learners;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadError = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _friendlyError(Object error) {
+    final message = error.toString();
+    if (message.contains('deadline-exceeded') ||
+        message.contains('TimeoutException')) {
+      return 'Admin data took too long to respond. Please try again.';
+    }
+    if (message.contains('permission-denied')) {
+      return 'Your administrator session needs refreshing. Sign out and sign '
+          'in again, then retry.';
+    }
+    return 'Admin data could not be loaded. Please try again.';
   }
 
   @override
@@ -117,10 +139,19 @@ class _AdminPageState extends State<AdminPage> {
     return FutureBuilder<bool>(
       future: _access,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const AlliamPage(
             title: 'Admin',
             child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return AlliamPage(
+            title: 'Admin',
+            child: _AdminLoadError(
+              message: _friendlyError(snapshot.error!),
+              onRetry: () => setState(() => _access = _initialize()),
+            ),
           );
         }
         if (snapshot.data != true) {
@@ -159,6 +190,8 @@ class _AdminPageState extends State<AdminPage> {
               const SizedBox(height: 20),
               if (_loading)
                 const Center(child: CircularProgressIndicator())
+              else if (_loadError != null)
+                _AdminLoadError(message: _loadError!, onRetry: _reload)
               else if (_section == 0)
                 _WordAudioList(
                   words: _words,
@@ -178,6 +211,31 @@ class _AdminPageState extends State<AdminPage> {
       },
     );
   }
+}
+
+class _AdminLoadError extends StatelessWidget {
+  const _AdminLoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.error_outline_rounded, size: 36),
+        const SizedBox(height: 12),
+        Text(message, textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Try again'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _WordAudioList extends StatelessWidget {
