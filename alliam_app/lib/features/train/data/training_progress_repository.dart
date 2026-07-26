@@ -17,7 +17,7 @@ class TrainingProgressRepository {
     required Set<String> incorrectWords,
   }) async {
     final user = _auth.currentUser;
-    if (user == null || attempted == 0) return null;
+    if (user == null || user.isAnonymous || attempted == 0) return null;
     final reference = _firestore.doc('accounts/${user.uid}/data/app-state');
     String? activeLearnerId;
     Map<String, dynamic>? normalizedJourney;

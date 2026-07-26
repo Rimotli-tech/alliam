@@ -32,10 +32,17 @@ class AdminLearner {
 }
 
 class AdminOverview {
-  const AdminOverview({required this.words, required this.learners});
+  const AdminOverview({
+    required this.words,
+    required this.learners,
+    required this.nextWordCursor,
+    required this.hasMoreWords,
+  });
 
   final List<AdminWordAudio> words;
   final List<AdminLearner> learners;
+  final String nextWordCursor;
+  final bool hasMoreWords;
 }
 
 class AdminService {
@@ -44,10 +51,17 @@ class AdminService {
 
   final FirebaseFunctions _functions;
 
-  Future<AdminOverview> loadOverview() async {
+  Future<AdminOverview> loadOverview({
+    String? wordCursor,
+    bool includeLearners = true,
+  }) async {
     final result = await _functions
         .httpsCallable('getAdminOverview')
-        .call<Map<dynamic, dynamic>>()
+        .call<Map<dynamic, dynamic>>({
+          'pageSize': 25,
+          'cursor': wordCursor ?? '',
+          'includeLearners': includeLearners,
+        })
         .timeout(const Duration(seconds: 30));
     final data = Map<String, dynamic>.from(result.data);
     final words = (data['words'] as List<dynamic>? ?? const []).map((value) {
@@ -71,7 +85,12 @@ class AdminService {
         grade: item['grade']?.toString() ?? 'Grade 1',
       );
     }).toList()..sort((a, b) => a.name.compareTo(b.name));
-    return AdminOverview(words: words, learners: learners);
+    return AdminOverview(
+      words: words,
+      learners: learners,
+      nextWordCursor: data['nextWordCursor']?.toString() ?? '',
+      hasMoreWords: data['hasMoreWords'] == true,
+    );
   }
 
   Future<String> audioUrl(String storagePath) =>

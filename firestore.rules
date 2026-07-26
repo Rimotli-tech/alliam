@@ -13,10 +13,11 @@ service cloud.firestore {
       allow delete: if ownsAccount(accountId);
       allow create: if ownsAccount(accountId) &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.role in ['pending', 'student', 'parent', 'school'];
+        request.resource.data.role in ['pending', 'student', 'parent', 'organization'];
       allow update: if ownsAccount(accountId) &&
         request.resource.data.uid == resource.data.uid &&
-        request.resource.data.role in ['pending', 'student', 'parent', 'school'];
+        (request.resource.data.role in ['pending', 'student', 'parent', 'organization'] ||
+          (request.resource.data.role == 'admin' && isAdmin()));
 
       match /{document=**} {
         allow read: if ownsAccount(accountId) || isAdmin();
@@ -37,6 +38,32 @@ service cloud.firestore {
     match /audioVersions/{versionId} {
       allow read: if request.auth != null;
       allow write: if false;
+    }
+
+    match /organizations/{organizationId} {
+      allow create: if request.auth != null &&
+        request.resource.data.ownerUid == request.auth.uid;
+      allow read: if isAdmin() ||
+        (request.auth != null &&
+          (resource.data.ownerUid == request.auth.uid ||
+            exists(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid))));
+      allow update, delete: if isAdmin() ||
+        (request.auth != null && resource.data.ownerUid == request.auth.uid);
+
+      match /members/{memberId} {
+        allow read: if isAdmin() ||
+          (request.auth != null &&
+            (get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid ||
+              exists(/databases/$(database)/documents/organizations/$(organizationId)/members/$(request.auth.uid))));
+        allow create: if request.auth != null &&
+          request.resource.data.uid == memberId &&
+          (memberId == request.auth.uid &&
+            request.resource.data.role == 'owner' &&
+            get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid);
+        allow update, delete: if isAdmin() ||
+          (request.auth != null &&
+            get(/databases/$(database)/documents/organizations/$(organizationId)).data.ownerUid == request.auth.uid);
+      }
     }
 
     match /players/{playerId} {

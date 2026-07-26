@@ -47,14 +47,19 @@ class _ProfilePageState extends State<ProfilePage> {
         final session = snapshot.data!;
         final title = switch (session.role) {
           AccountRole.parent => 'Family profile',
-          AccountRole.school => 'School profile',
+          AccountRole.organization => 'Organisation profile',
+          AccountRole.admin => 'Admin profile',
           _ => 'Your profile',
         };
         return AlliamPage(
           title: title,
-          subtitle: session.role == AccountRole.student
-              ? 'Your spelling journey'
-              : 'Account and learner management',
+          subtitle: switch (session.role) {
+            AccountRole.student => 'Your spelling journey',
+            AccountRole.parent => 'Account and learner management',
+            AccountRole.organization => 'Organisation and learner management',
+            AccountRole.admin => 'Administrator account',
+            _ => null,
+          },
           child: Column(
             children: [
               _OwnerCard(
@@ -74,9 +79,21 @@ class _ProfilePageState extends State<ProfilePage> {
                       context.go('/profile/learner/${learner.id}'),
                   onSwitch: (learner) => _switchLearner(learner),
                 )
-              else if (session.role == AccountRole.school)
-                _SchoolSummary(session: session)
-              else if (session.activeLearner != null)
+              else if (session.role == AccountRole.organization) ...[
+                _OrganizationSummary(session: session),
+                const SizedBox(height: 22),
+                _LearnersCard(
+                  session: session,
+                  activeLearnerId:
+                      _selectedLearnerId ?? session.activeLearnerId,
+                  switchingLearnerId: _switchingLearnerId,
+                  onAdd: () => _addLearner(session),
+                  onView: (learner) =>
+                      context.go('/profile/learner/${learner.id}'),
+                  onSwitch: (learner) => _switchLearner(learner),
+                ),
+              ] else if (session.role == AccountRole.student &&
+                  session.activeLearner != null)
                 _JourneySummary(learner: session.activeLearner!),
             ],
           ),
@@ -108,7 +125,9 @@ class _ProfilePageState extends State<ProfilePage> {
         _switchingLearnerId = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Learner could not be switched. Try again.')),
+        const SnackBar(
+          content: Text('Learner could not be switched. Try again.'),
+        ),
       );
     }
   }
@@ -150,11 +169,11 @@ class _ProfilePageState extends State<ProfilePage> {
               controller: country,
               decoration: const InputDecoration(labelText: 'Country'),
             ),
-            if (session.role == AccountRole.school) ...[
+            if (session.role == AccountRole.organization) ...[
               const SizedBox(height: 14),
               TextField(
                 controller: school,
-                decoration: const InputDecoration(labelText: 'School'),
+                decoration: const InputDecoration(labelText: 'Organisation'),
               ),
             ],
           ],
@@ -176,7 +195,7 @@ class _ProfilePageState extends State<ProfilePage> {
         user: _user,
         name: name.text.trim(),
         country: country.text.trim(),
-        schoolName: session.role == AccountRole.school
+        schoolName: session.role == AccountRole.organization
             ? school.text.trim()
             : null,
       );
@@ -279,11 +298,13 @@ class _OwnerCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 5),
-                Text(user.email ?? 'Demo account'),
+                Text(user.email ?? 'Account'),
                 const SizedBox(height: 5),
                 Text(switch (session.role) {
                   AccountRole.parent => 'Parent account',
-                  AccountRole.school => session.schoolName,
+                  AccountRole.organization =>
+                    'Organisation account · ${session.organizationName}',
+                  AccountRole.admin => 'Administrator account',
                   _ => 'Learner account',
                 }, style: const TextStyle(color: AlliamColors.coral)),
               ],
@@ -364,7 +385,9 @@ class _LearnersCard extends StatelessWidget {
                         avatar: switchingLearnerId == learner.id
                             ? const SizedBox.square(
                                 dimension: 13,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.check_rounded, size: 15),
                         label: Text(
@@ -508,8 +531,8 @@ class _LearningPath extends StatelessWidget {
   }
 }
 
-class _SchoolSummary extends StatelessWidget {
-  const _SchoolSummary({required this.session});
+class _OrganizationSummary extends StatelessWidget {
+  const _OrganizationSummary({required this.session});
 
   final AccountSession session;
 
@@ -517,11 +540,18 @@ class _SchoolSummary extends StatelessWidget {
   Widget build(BuildContext context) => _ProfileSurface(
     child: Column(
       children: [
-        const Icon(Icons.school_outlined, color: AlliamColors.coral, size: 44),
+        const Icon(
+          Icons.corporate_fare_outlined,
+          color: AlliamColors.coral,
+          size: 44,
+        ),
         const SizedBox(height: 14),
         Text(session.schoolName, style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
-        const Text('Roster and staff management will live in the School hub.'),
+        const Text(
+          'Learners, teams, competitions, and invitations are managed from '
+          'the Organisation dashboard.',
+        ),
       ],
     ),
   );

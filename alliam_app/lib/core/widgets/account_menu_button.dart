@@ -1,8 +1,8 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../theme/alliam_colors.dart';
+import '../auth/session_sign_out.dart';
 
 class AccountMenuButton extends StatelessWidget {
   const AccountMenuButton({super.key});
@@ -20,11 +20,11 @@ class AccountMenuButton extends StatelessWidget {
         if (value == 'profile') context.go('/profile');
         if (value == 'settings') context.go('/settings');
         if (value == 'signout') {
-          await FirebaseAuth.instance.signOut();
+          await signOutAlliamSession();
           if (context.mounted) context.go('/');
         }
       },
-      itemBuilder: (_) => const [
+      itemBuilder: (_) => [
         PopupMenuItem(
           value: 'home',
           child: ListTile(
@@ -49,8 +49,8 @@ class AccountMenuButton extends StatelessWidget {
             title: Text('Settings'),
           ),
         ),
-        PopupMenuDivider(),
-        PopupMenuItem(
+        const PopupMenuDivider(),
+        const PopupMenuItem(
           value: 'signout',
           child: ListTile(
             dense: true,

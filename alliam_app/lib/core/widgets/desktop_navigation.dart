@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../admin/admin_access.dart';
 import '../audio/sound_effects_service.dart';
+import '../auth/session_sign_out.dart';
 import '../theme/alliam_colors.dart';
+import '../../features/auth/data/account_repository.dart';
+import '../../features/auth/domain/account_session.dart';
 import 'alliam_logo.dart';
 
 class DesktopNavigation extends StatefulWidget {
@@ -22,7 +25,7 @@ class _DesktopNavigationState extends State<DesktopNavigation> {
   static bool? _rememberedCollapsed;
   bool _initialized = false;
   late bool _collapsed;
-  Future<bool>? _adminAccess;
+  Future<AccountSession>? _accountSession;
 
   static const _destinations = [
     (Icons.home_outlined, 'Home', '/home'),
@@ -39,7 +42,12 @@ class _DesktopNavigationState extends State<DesktopNavigation> {
     if (_initialized) return;
     _collapsed =
         _rememberedCollapsed ?? MediaQuery.sizeOf(context).width < 1200;
-    _adminAccess = AdminAccess.ensureAdmin();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _accountSession = AccountRepository(
+        FirebaseFirestore.instance,
+      ).load(user);
+    }
     _initialized = true;
   }
 
@@ -132,17 +140,30 @@ class _DesktopNavigationState extends State<DesktopNavigation> {
               label: destination.$2,
               onTap: () => _navigate(destination.$3),
             ),
-          FutureBuilder<bool>(
-            future: _adminAccess,
-            builder: (context, snapshot) => snapshot.data == true
-                ? _NavigationItem(
-                    collapsed: _collapsed,
-                    selected: _selected('/admin'),
-                    icon: Icons.admin_panel_settings_outlined,
-                    label: 'Admin',
-                    onTap: () => _navigate('/admin'),
-                  )
-                : const SizedBox.shrink(),
+          FutureBuilder<AccountSession>(
+            future: _accountSession,
+            builder: (context, snapshot) {
+              final role = snapshot.data?.role;
+              if (role == AccountRole.admin) {
+                return _NavigationItem(
+                  collapsed: _collapsed,
+                  selected: _selected('/admin'),
+                  icon: Icons.admin_panel_settings_outlined,
+                  label: 'Admin',
+                  onTap: () => _navigate('/admin'),
+                );
+              }
+              if (role == AccountRole.organization) {
+                return _NavigationItem(
+                  collapsed: _collapsed,
+                  selected: _selected('/organization'),
+                  icon: Icons.corporate_fare_outlined,
+                  label: 'Organisation',
+                  onTap: () => _navigate('/organization'),
+                );
+              }
+              return const SizedBox.shrink();
+            },
           ),
           const Spacer(),
           Container(
@@ -171,7 +192,7 @@ class _DesktopNavigationState extends State<DesktopNavigation> {
             icon: Icons.logout_rounded,
             label: 'Sign out',
             onTap: () async {
-              await FirebaseAuth.instance.signOut();
+              await signOutAlliamSession();
               if (context.mounted) context.go('/');
             },
           ),

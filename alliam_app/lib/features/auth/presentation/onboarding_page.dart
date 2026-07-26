@@ -36,7 +36,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   int get _lastStep => switch (_role) {
     AccountRole.parent => 3,
-    AccountRole.school => 2,
+    AccountRole.organization => 2,
     _ => 2,
   };
 
@@ -77,8 +77,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
             grade: _grade,
             school: _learnerSchool.text.trim(),
           );
-        case AccountRole.school:
-          await repository.completeSchool(
+        case AccountRole.organization:
+          await repository.completeOrganization(
             user: widget.user,
             schoolName: _schoolName.text.trim(),
             administratorName: _ownerName.text.trim(),
@@ -110,9 +110,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
         'Enter the parent or guardian name.',
       (AccountRole.parent, 2) when _learnerName.text.trim().isEmpty =>
         'Enter the learner name.',
-      (AccountRole.school, 1) when _schoolName.text.trim().isEmpty =>
-        'Enter the school or organisation name.',
-      (AccountRole.school, 1) when _ownerName.text.trim().isEmpty =>
+      (AccountRole.organization, 1) when _schoolName.text.trim().isEmpty =>
+        'Enter the organisation or coaching name.',
+      (AccountRole.organization, 1) when _ownerName.text.trim().isEmpty =>
         'Enter the administrator or coach name.',
       (AccountRole.student, 1) when _learnerName.text.trim().isEmpty =>
         'Enter the learner name.',
@@ -172,7 +172,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
         context,
         title: 'Add the first learner',
       ),
-      (AccountRole.school, 1) => _schoolStep(context),
+      (AccountRole.organization, 1) => _organizationStep(context),
       (AccountRole.student, 1) => _learnerStep(
         context,
         title: 'Create the learner profile',
@@ -257,7 +257,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
           final cards = [
             (AccountRole.student, Icons.person_outline_rounded, 'Student'),
             (AccountRole.parent, Icons.shield_outlined, 'Parent'),
-            (AccountRole.school, Icons.school_outlined, 'School'),
+            (
+              AccountRole.organization,
+              Icons.corporate_fare_outlined,
+              'Organisation / Coach',
+            ),
           ];
           return Wrap(
             spacing: 12,
@@ -317,17 +321,17 @@ class _OnboardingPageState extends State<OnboardingPage> {
     ],
   );
 
-  Widget _schoolStep(BuildContext context) => Column(
+  Widget _organizationStep(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       _heading(
         context,
-        'Set up your school',
+        'Set up your organisation',
         'Create the account for rosters, teams, fixtures, and competitions.',
       ),
       const SizedBox(height: 26),
       _field(
-        'School or organisation name',
+        'Organisation, school, or coaching name',
         _schoolName,
         'Emerald Primary School',
       ),
@@ -389,10 +393,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
         'Add more learners or switch between them from your family profile.',
         Icons.family_restroom_rounded,
       ),
-      AccountRole.school => (
-        'Your school hub is ready',
-        'Build the roster, organise teams, and schedule competitions.',
-        Icons.school_outlined,
+      AccountRole.organization => (
+        'Your organisation hub is ready',
+        'Build your roster, organise teams, and schedule competitions.',
+        Icons.corporate_fare_outlined,
       ),
       _ => (
         'You’re ready to spell',

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../domain/account_session.dart';
+import '../../organization/data/organization_repository.dart';
 
 class AccountRepository {
   AccountRepository(this._firestore);
@@ -15,6 +16,7 @@ class AccountRepository {
       _firestore.doc('accounts/$uid/data/app-state');
 
   Future<AccountSession> load(User user) async {
+    final token = await user.getIdTokenResult();
     final results = await Future.wait([
       _account(user.uid).get(),
       _state(user.uid).get(),
@@ -29,14 +31,20 @@ class AccountRepository {
     final learnerDocuments = results[2] as QuerySnapshot<Map<String, dynamic>>;
     final value = _map(stateData['value']);
 
-    final accountRole = _role(accountData['role']);
+    final claimedAdmin = token.claims?['admin'] == true;
+    final accountRole = claimedAdmin
+        ? AccountRole.admin
+        : _role(accountData['role']);
     final legacyRole = _role(value['accountType']);
     final role =
         accountRole == AccountRole.pending && legacyRole != AccountRole.pending
         ? legacyRole
         : accountRole;
     final owner = _map(value['accountOwner']);
-    final school = _map(value['schoolAccount']);
+    final school = {
+      ..._map(value['schoolAccount']),
+      ..._map(value['organizationAccount']),
+    };
     final learnersById = <String, LearnerProfile>{};
     for (final profile in _list(
       value['profiles'],
@@ -57,18 +65,32 @@ class AccountRepository {
       ownerName: _ownerName(owner, school, accountData, user),
       ownerCountry: (owner['country'] ?? school['country'] ?? 'Nigeria')
           .toString(),
-      schoolName: (school['name'] ?? accountData['schoolName'] ?? '')
-          .toString(),
+      schoolName:
+          (school['name'] ??
+                  accountData['organizationName'] ??
+                  accountData['schoolName'] ??
+                  '')
+              .toString(),
       activeLearnerId:
           (accountData['activeLearnerId'] ?? value['activeProfileId'])
               ?.toString(),
       learners: learners,
+      organizationId: accountData['organizationId']?.toString(),
     );
     final legacyProfileCount = _list(value['profiles']).length;
     if (session.onboardingComplete &&
-        ((accountData['schemaVersion'] as num?)?.round() != 2 ||
+        ((accountData['schemaVersion'] as num?)?.round() != 3 ||
+            accountData['role']?.toString() != session.role.name ||
             legacyProfileCount != learners.length)) {
       await _migrateLegacy(user, session);
+    }
+    if (session.role == AccountRole.organization) {
+      await OrganizationRepository(_firestore).ensureOwnerFoundation(
+        user: user,
+        organizationId: session.organizationId ?? user.uid,
+        name: session.organizationName,
+        country: session.ownerCountry,
+      );
     }
     return session;
   }
@@ -80,9 +102,13 @@ class AccountRepository {
       'email': user.email,
       'displayName': session.ownerName,
       'role': session.role.name,
-      'schemaVersion': 2,
+      'schemaVersion': 3,
       'activeLearnerId': session.activeLearnerId,
       'schoolName': session.schoolName,
+      'organizationName': session.organizationName,
+      'organizationId': session.role == AccountRole.organization
+          ? session.organizationId ?? user.uid
+          : null,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     for (final learner in session.learners) {
@@ -144,7 +170,7 @@ class AccountRepository {
     );
   }
 
-  Future<void> completeSchool({
+  Future<void> completeOrganization({
     required User user,
     required String schoolName,
     required String administratorName,
@@ -152,7 +178,7 @@ class AccountRepository {
   }) async {
     await _saveSetup(
       user: user,
-      role: AccountRole.school,
+      role: AccountRole.organization,
       ownerName: administratorName,
       country: country,
       profiles: const [],
@@ -164,15 +190,13 @@ class AccountRepository {
       },
       schoolName: schoolName,
     );
+    await OrganizationRepository(_firestore).ensureOwnerFoundation(
+      user: user,
+      organizationId: user.uid,
+      name: schoolName,
+      country: country,
+    );
   }
-
-  Future<void> createDemo(User user) => completeStudent(
-    user: user,
-    name: 'Ada',
-    grade: 'Grade 1',
-    country: 'Nigeria',
-    school: 'Demo Primary School',
-  );
 
   Future<void> setActiveLearner(User user, String learnerId) async {
     final batch = _firestore.batch();
@@ -228,8 +252,8 @@ class AccountRepository {
     final session = await load(user);
     await _state(user.uid).set({
       'value': {
-        if (session.role == AccountRole.school)
-          'schoolAccount': {
+        if (session.role == AccountRole.organization)
+          'organizationAccount': {
             'name': schoolName ?? session.schoolName,
             'adminName': name,
             'country': country,
@@ -306,9 +330,11 @@ class AccountRepository {
       'email': user.email,
       'displayName': ownerName,
       'role': roleName,
-      'schemaVersion': 2,
+      'schemaVersion': 3,
       'activeLearnerId': activeProfileId,
       'schoolName': schoolName,
+      'organizationName': schoolName,
+      'organizationId': role == AccountRole.organization ? user.uid : null,
       'updatedAt': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -319,7 +345,7 @@ class AccountRepository {
         'profiles': profiles.map((profile) => profile.toMap()).toList(),
         'activeProfileId': activeProfileId,
         'accountOwner': accountOwner,
-        'schoolAccount': schoolAccount,
+        'organizationAccount': schoolAccount,
         'settings': {
           'learnerLevel': 'Foundation',
           'voice': 'Alliam One',
@@ -373,7 +399,8 @@ class AccountRepository {
     return switch (value?.toString().toLowerCase()) {
       'student' || 'learner' => AccountRole.student,
       'parent' => AccountRole.parent,
-      'school' || 'coach' => AccountRole.school,
+      'school' || 'coach' || 'organization' => AccountRole.organization,
+      'admin' => AccountRole.admin,
       _ => AccountRole.pending,
     };
   }

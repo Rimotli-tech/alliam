@@ -1,11 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/widgets/alliam_logo.dart';
-import '../data/account_repository.dart';
 
 class SignInPage extends StatefulWidget {
   const SignInPage({super.key, this.openSignUp = false});
@@ -85,20 +83,17 @@ class _SignInPageState extends State<SignInPage> {
     }
   }
 
-  Future<void> _demo() async {
+  Future<void> _googleSignIn() async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final credential = await FirebaseAuth.instance.signInAnonymously();
-      if (credential.user != null) {
-        await AccountRepository(
-          FirebaseFirestore.instance,
-        ).createDemo(credential.user!);
-      }
+      final provider = GoogleAuthProvider()
+        ..setCustomParameters({'prompt': 'select_account'});
+      await FirebaseAuth.instance.signInWithPopup(provider);
     } on FirebaseAuthException catch (error) {
-      setState(() => _error = _message(error.code));
+      if (mounted) setState(() => _error = _message(error.code));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -170,7 +165,7 @@ class _SignInPageState extends State<SignInPage> {
                     email: _email,
                     password: _password,
                     onSubmit: _submit,
-                    onDemo: _demo,
+                    onGoogleSignIn: _googleSignIn,
                     onForgotPassword: _forgotPassword,
                     onToggle: () => setState(() {
                       _creating = !_creating;
@@ -206,7 +201,11 @@ class _SignInPageState extends State<SignInPage> {
       'email-already-in-use' => 'An account already uses this email.',
       'weak-password' => 'Use a password with at least six characters.',
       'network-request-failed' => 'Unable to connect. Please try again.',
-      'operation-not-allowed' => 'Demo access is temporarily unavailable.',
+      'operation-not-allowed' => 'Google sign-in is not enabled yet.',
+      'popup-closed-by-user' => 'Google sign-in was cancelled.',
+      'popup-blocked' => 'Allow pop-ups to continue with Google.',
+      'account-exists-with-different-credential' =>
+        'That email already uses another sign-in method.',
       'user-not-found' => 'No account uses that email address.',
       'invalid-email' => 'Enter a valid email address.',
       'too-many-requests' => 'Please wait a moment before trying again.',
@@ -325,7 +324,7 @@ class _AuthCard extends StatelessWidget {
     required this.email,
     required this.password,
     required this.onSubmit,
-    required this.onDemo,
+    required this.onGoogleSignIn,
     required this.onForgotPassword,
     required this.onToggle,
   });
@@ -337,7 +336,7 @@ class _AuthCard extends StatelessWidget {
   final TextEditingController email;
   final TextEditingController password;
   final VoidCallback onSubmit;
-  final VoidCallback onDemo;
+  final VoidCallback onGoogleSignIn;
   final VoidCallback onForgotPassword;
   final VoidCallback onToggle;
 
@@ -483,9 +482,9 @@ class _AuthCard extends StatelessWidget {
           SizedBox(
             height: 52,
             child: OutlinedButton.icon(
-              onPressed: busy ? null : onDemo,
-              icon: const Icon(Icons.play_arrow_outlined, size: 18),
-              label: const Text('Explore with a demo profile'),
+              onPressed: busy ? null : onGoogleSignIn,
+              icon: const Icon(Icons.g_mobiledata_rounded, size: 24),
+              label: const Text('Continue with Google'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AlliamColors.text,
                 backgroundColor: AlliamColors.surfaceStrong,

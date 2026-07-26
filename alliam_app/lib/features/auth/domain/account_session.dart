@@ -1,4 +1,4 @@
-enum AccountRole { pending, student, parent, school }
+enum AccountRole { pending, student, parent, organization, admin }
 
 class LearnerProfile {
   const LearnerProfile({
@@ -58,6 +58,7 @@ class AccountSession {
     required this.schoolName,
     required this.activeLearnerId,
     required this.learners,
+    this.organizationId,
   });
 
   final AccountRole role;
@@ -66,8 +67,20 @@ class AccountSession {
   final String schoolName;
   final String? activeLearnerId;
   final List<LearnerProfile> learners;
+  final String? organizationId;
+
+  String get organizationName => schoolName;
+  bool get managesLearners =>
+      role == AccountRole.parent || role == AccountRole.organization;
+
+  String get entryLocation => switch (role) {
+    AccountRole.admin => '/admin',
+    AccountRole.organization => '/organization',
+    _ => '/pathway',
+  };
 
   LearnerProfile? get activeLearner {
+    if (role == AccountRole.admin) return null;
     for (final learner in learners) {
       if (learner.id == activeLearnerId) return learner;
     }
@@ -92,6 +105,7 @@ class AccountSession {
       schoolName: '',
       activeLearnerId: null,
       learners: const [],
+      organizationId: null,
     );
   }
 }

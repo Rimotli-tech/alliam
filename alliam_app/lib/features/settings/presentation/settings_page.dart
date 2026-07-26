@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/auth/session_sign_out.dart';
+
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/audio/background_music_service.dart';
 import '../../../core/audio/sound_effects_service.dart';
@@ -343,7 +345,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _signOut() async {
-    await FirebaseAuth.instance.signOut();
+    await signOutAlliamSession();
     if (mounted) context.go('/');
   }
 

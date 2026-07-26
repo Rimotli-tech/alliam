@@ -34,7 +34,8 @@ class _PathwayPageState extends State<PathwayPage> {
 
   Future<({AccountSession session, AlliamSettings settings})> _load() async {
     final auth = FirebaseAuth.instance;
-    final user = auth.currentUser!;
+    final user = auth.currentUser;
+    if (user == null) throw StateError('Sign in to continue.');
     final values = await Future.wait([
       AccountRepository(FirebaseFirestore.instance).load(user),
       SettingsRepository(FirebaseFirestore.instance, auth).load(),

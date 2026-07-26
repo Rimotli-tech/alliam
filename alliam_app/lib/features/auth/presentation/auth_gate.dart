@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/admin/admin_access.dart';
 import '../data/account_repository.dart';
 import '../domain/account_session.dart';
 import 'onboarding_page.dart';
@@ -20,6 +21,13 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   int _revision = 0;
 
+  Future<AccountSession> _loadAccount(User user) async {
+    if (user.email?.toLowerCase() == AdminAccess.bootstrapEmail) {
+      await AdminAccess.ensureAdmin();
+    }
+    return AccountRepository(FirebaseFirestore.instance).load(user);
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -34,11 +42,22 @@ class _AuthGateState extends State<AuthGate> {
         if (user == null) return SignInPage(openSignUp: widget.openSignUp);
         return FutureBuilder<AccountSession>(
           key: ValueKey('${user.uid}-$_revision'),
-          future: AccountRepository(FirebaseFirestore.instance).load(user),
+          future: _loadAccount(user),
           builder: (context, accountSnapshot) {
             if (accountSnapshot.connectionState != ConnectionState.done) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (accountSnapshot.hasError) {
+              return Scaffold(
+                body: Center(
+                  child: FilledButton.icon(
+                    onPressed: () => setState(() => _revision++),
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry account setup'),
+                  ),
+                ),
               );
             }
             final session =
@@ -51,7 +70,7 @@ class _AuthGateState extends State<AuthGate> {
               );
             }
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) context.go('/pathway');
+              if (mounted) context.go(session.entryLocation);
             });
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),

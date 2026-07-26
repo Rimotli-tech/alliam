@@ -4,7 +4,7 @@ const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https")
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore, FieldPath, FieldValue } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 const { NEXT_200_WORDS } = require("./approved-word-batches");
 
@@ -1392,22 +1392,44 @@ exports.bootstrapAdminRole = onCall({ region: AUDIO_REGION }, async (request) =>
 exports.getAdminOverview = onCall({ region: AUDIO_REGION }, async (request) => {
   requireAdmin(request);
   const db = getFirestore();
+  const pageSize = Math.min(Math.max(Number(request.data?.pageSize) || 25, 1), 50);
+  const cursor = String(request.data?.cursor || "").trim();
+  const includeLearners = request.data?.includeLearners !== false;
+  let wordQuery = db.collection("words")
+    .orderBy(FieldPath.documentId())
+    .limit(pageSize + 1);
+  if (cursor) wordQuery = wordQuery.startAfter(cursor);
   const [wordSnapshot, learnerSnapshot] = await Promise.all([
-    db.collection("words").get(),
-    db.collectionGroup("learners").get(),
+    wordQuery.get(),
+    includeLearners ? db.collectionGroup("learners").get() : Promise.resolve(null),
   ]);
+  const hasMoreWords = wordSnapshot.docs.length > pageSize;
+  const wordDocuments = wordSnapshot.docs.slice(0, pageSize);
   return {
-    words: wordSnapshot.docs.map((document) => {
+    words: wordDocuments.map((document) => {
       const data = document.data();
+      const word = String(data.word || document.id);
+      const normalizedWord = word.trim().toLowerCase();
+      const audioCandidates = [
+        data.approvedAudio?.pronunciation,
+        data.audio?.pronunciation,
+      ].map((asset) => typeof asset === "string" ? asset : asset?.storagePath)
+        .filter((path) => typeof path === "string" && path.length > 0);
+      const matchingPath = audioCandidates.find((path) =>
+        path.toLowerCase().split("/").includes(normalizedWord));
+      const version = String(data.pronunciationVersion || "").trim();
       return {
         id: document.id,
-        word: String(data.word || document.id),
+        word,
         level: String(data.level || "Unassigned"),
-        storagePath: String(data.audio?.pronunciation?.storagePath || ""),
+        storagePath: matchingPath ||
+          (version ? `audio/${version}/${normalizedWord}/pronunciation.mp3` : ""),
         approved: data.approved === true,
       };
     }),
-    learners: learnerSnapshot.docs.map((document) => {
+    nextWordCursor: wordDocuments.at(-1)?.id || "",
+    hasMoreWords,
+    learners: (learnerSnapshot?.docs || []).map((document) => {
       const data = document.data();
       return {
         accountId: String(data.accountId || document.ref.parent.parent.id),

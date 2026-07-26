@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../audio/sound_effects_service.dart';
+import '../auth/session_sign_out.dart';
 import '../theme/alliam_colors.dart';
 import 'alliam_background.dart';
 import 'alliam_logo.dart';
@@ -78,6 +78,8 @@ class _PageContent extends StatelessWidget {
     '/social',
     '/profile',
     '/settings',
+    '/admin',
+    '/organization',
   }.contains(path);
 
   @override
@@ -108,17 +110,25 @@ class _PageContent extends StatelessWidget {
                 tooltip: 'Account',
                 icon: const Icon(Icons.person_outline_rounded),
                 onSelected: (value) async {
+                  if (value == 'home') context.go('/home');
                   if (value == 'profile') context.go('/profile');
                   if (value == 'settings') context.go('/settings');
                   if (value == 'signout') {
-                    await FirebaseAuth.instance.signOut();
+                    await signOutAlliamSession();
                     if (context.mounted) context.go('/');
                   }
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'profile', child: Text('Profile')),
-                  PopupMenuItem(value: 'settings', child: Text('Settings')),
-                  PopupMenuItem(value: 'signout', child: Text('Sign out')),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'home', child: Text('Explore')),
+                  const PopupMenuItem(value: 'profile', child: Text('Profile')),
+                  const PopupMenuItem(
+                    value: 'settings',
+                    child: Text('Settings'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'signout',
+                    child: Text('Sign out'),
+                  ),
                 ],
               ),
           ],

@@ -5,6 +5,7 @@ import '../features/auth/presentation/auth_gate.dart';
 import '../features/admin/presentation/admin_page.dart';
 import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
+import '../features/organization/presentation/organization_dashboard_page.dart';
 import '../features/pathway/presentation/pathway_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/rankings/presentation/rankings_page.dart';
@@ -29,10 +30,7 @@ final alliamRouter = GoRouter(
           AuthGate(openSignUp: state.uri.queryParameters['mode'] == 'signup'),
     ),
     GoRoute(path: '/home', builder: (context, state) => const HomePage()),
-    GoRoute(
-      path: '/pathway',
-      builder: (context, state) => const PathwayPage(),
-    ),
+    GoRoute(path: '/pathway', builder: (context, state) => const PathwayPage()),
     ShellRoute(
       builder: (context, state, child) =>
           ResponsiveNavigationShell(currentPath: state.uri.path, child: child),
@@ -66,9 +64,10 @@ final alliamRouter = GoRouter(
           path: '/settings',
           builder: (context, state) => const SettingsPage(),
         ),
+        GoRoute(path: '/admin', builder: (context, state) => const AdminPage()),
         GoRoute(
-          path: '/admin',
-          builder: (context, state) => const AdminPage(),
+          path: '/organization',
+          builder: (context, state) => const OrganizationDashboardPage(),
         ),
       ],
     ),

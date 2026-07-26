@@ -21,7 +21,7 @@ class CompetePage extends StatelessWidget {
       (Icons.emoji_events_outlined, 'Ranked', 'Rating'),
       (Icons.groups_outlined, 'Private', 'Room code'),
       (Icons.shield_outlined, 'Teams', '6v6'),
-      (Icons.school_outlined, 'Schools', 'Fixture'),
+      (Icons.corporate_fare_outlined, 'Organisations', 'Fixture'),
       (Icons.flag_outlined, 'Tournament', 'Bracket'),
     ];
     return AlliamPage(
@@ -106,7 +106,7 @@ class CompetePage extends StatelessWidget {
         content: Text(
           index == 3
               ? 'Team matches are created from your team hub.'
-              : 'This arena is scheduled through the School hub.',
+              : 'This arena is scheduled through the Organisation dashboard.',
         ),
       ),
     );

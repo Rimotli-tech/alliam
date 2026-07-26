@@ -837,10 +837,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.58),
                   borderRadius: BorderRadius.circular(34),
-                  border: Border.all(
-                    color: const Color(0xFFFDDAB9),
-                    width: 2,
-                  ),
+                  border: Border.all(color: const Color(0xFFFDDAB9), width: 2),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x3DD7B69B),
@@ -928,136 +925,138 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 980),
               child: Column(
-              children: [
-                if (_phase == _SessionPhase.attempt &&
-                    widget.mode != TrainingMode.similarWords &&
-                    widget.mode != TrainingMode.buildTheWord)
-                  SizedBox(
-                    width: 1,
-                    height: 1,
-                    child: Opacity(
-                      opacity: 0.01,
-                      child: TextField(
-                        controller: _answer,
-                        focusNode: _focus,
-                        autofocus: true,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        enableInteractiveSelection: false,
-                        showCursor: false,
-                        textCapitalization: TextCapitalization.none,
-                        keyboardType: TextInputType.text,
-                        textInputAction: TextInputAction.done,
-                        maxLength: _current!.word.length,
-                        buildCounter:
-                            (
-                              context, {
-                              required currentLength,
-                              required isFocused,
-                              required maxLength,
-                            }) => null,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(RegExp('[a-zA-Z]')),
-                          _LowerCaseTextFormatter(),
-                        ],
-                        onChanged: (value) {
-                          if (value.length > _typedLength) {
-                            unawaited(SoundEffectsService.instance.key());
-                          }
-                          _typedLength = value.length;
-                          setState(() {});
-                        },
-                        onSubmitted: (_) {
-                          if (_answer.text.isNotEmpty) unawaited(_submit());
-                        },
-                      ),
-                    ),
-                  ),
-                SizedBox(
-                  height: 76,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.center,
-                    children: [
-                      if (feedback && _lastCorrect)
-                        Positioned(
-                          top: -62,
-                          child: _SuccessCheck(
-                            key: ValueKey('success-check-$_index'),
-                          ),
+                children: [
+                  if (_phase == _SessionPhase.attempt &&
+                      widget.mode != TrainingMode.similarWords &&
+                      widget.mode != TrainingMode.buildTheWord)
+                    SizedBox(
+                      width: 1,
+                      height: 1,
+                      child: Opacity(
+                        opacity: 0.01,
+                        child: TextField(
+                          controller: _answer,
+                          focusNode: _focus,
+                          autofocus: true,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          enableInteractiveSelection: false,
+                          showCursor: false,
+                          textCapitalization: TextCapitalization.none,
+                          keyboardType: TextInputType.text,
+                          textInputAction: TextInputAction.done,
+                          maxLength: _current!.word.length,
+                          buildCounter:
+                              (
+                                context, {
+                                required currentLength,
+                                required isFocused,
+                                required maxLength,
+                              }) => null,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp('[a-zA-Z]'),
+                            ),
+                            _LowerCaseTextFormatter(),
+                          ],
+                          onChanged: (value) {
+                            if (value.length > _typedLength) {
+                              unawaited(SoundEffectsService.instance.key());
+                            }
+                            _typedLength = value.length;
+                            setState(() {});
+                          },
+                          onSubmitted: (_) {
+                            if (_answer.text.isNotEmpty) unawaited(_submit());
+                          },
                         ),
-                      Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            title,
-                            style: Theme.of(context).textTheme.headlineMedium
-                                ?.copyWith(
-                                  color: AlliamColors.coral,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            feedback
-                                ? _lastCorrect
-                                      ? 'That spelling is correct.'
-                                      : 'The correct spelling is shown below.'
-                                : teaching
-                                ? 'Stay focused.'
-                                : 'Type the spelling, then submit.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
                       ),
-                    ],
-                  ),
-                ),
-                if (widget.mode == TrainingMode.timedDrill &&
-                    _phase == _SessionPhase.attempt) ...[
-                  const SizedBox(height: 18),
-                  _Clock(seconds: _secondsLeft),
-                ],
-                if (widget.mode.isTimed &&
-                    widget.mode != TrainingMode.timedDrill &&
-                    _phase == _SessionPhase.attempt) ...[
-                  const SizedBox(height: 18),
-                  _Clock(seconds: _secondsLeft),
-                ],
-                if (widget.mode == TrainingMode.survivalRun ||
-                    widget.mode == TrainingMode.streakChallenge) ...[
-                  const SizedBox(height: 14),
-                  _RunStatus(
-                    lives: widget.mode == TrainingMode.survivalRun
-                        ? _lives
-                        : null,
-                    streak: _streak,
-                  ),
-                ],
-                const SizedBox(height: 22),
-                _modePrompt(context, teaching: teaching),
-                const SizedBox(height: 22),
-                SizedBox(
-                  height: 250,
-                  child: Center(
-                    child: LetterDiamonds(
-                      word: _expectedAnswer,
-                      entered: _answer.text,
-                      revealWord: reveal,
-                      success: feedback && _lastCorrect,
-                      activeIndex: teaching ? _activeSpellingLetter : -1,
+                    ),
+                  SizedBox(
+                    height: 76,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        if (feedback && _lastCorrect)
+                          Positioned(
+                            top: -62,
+                            child: _SuccessCheck(
+                              key: ValueKey('success-check-$_index'),
+                            ),
+                          ),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              title,
+                              style: Theme.of(context).textTheme.headlineMedium
+                                  ?.copyWith(
+                                    color: AlliamColors.coral,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              feedback
+                                  ? _lastCorrect
+                                        ? 'That spelling is correct.'
+                                        : 'The correct spelling is shown below.'
+                                  : teaching
+                                  ? 'Stay focused.'
+                                  : 'Type the spelling, then submit.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 22),
-                SizedBox(
-                  height: 150,
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: _exerciseControls(feedback),
+                  if (widget.mode == TrainingMode.timedDrill &&
+                      _phase == _SessionPhase.attempt) ...[
+                    const SizedBox(height: 18),
+                    _Clock(seconds: _secondsLeft),
+                  ],
+                  if (widget.mode.isTimed &&
+                      widget.mode != TrainingMode.timedDrill &&
+                      _phase == _SessionPhase.attempt) ...[
+                    const SizedBox(height: 18),
+                    _Clock(seconds: _secondsLeft),
+                  ],
+                  if (widget.mode == TrainingMode.survivalRun ||
+                      widget.mode == TrainingMode.streakChallenge) ...[
+                    const SizedBox(height: 14),
+                    _RunStatus(
+                      lives: widget.mode == TrainingMode.survivalRun
+                          ? _lives
+                          : null,
+                      streak: _streak,
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  _modePrompt(context, teaching: teaching),
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: 250,
+                    child: Center(
+                      child: LetterDiamonds(
+                        word: _expectedAnswer,
+                        entered: _answer.text,
+                        revealWord: reveal,
+                        success: feedback && _lastCorrect,
+                        activeIndex: teaching ? _activeSpellingLetter : -1,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 22),
+                  SizedBox(
+                    height: 150,
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: _exerciseControls(feedback),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1657,7 +1656,11 @@ class _SessionProgress extends StatelessWidget {
                     : null,
               ),
               child: index < current
-                  ? const Icon(Icons.check_rounded, size: 9, color: Colors.white)
+                  ? const Icon(
+                      Icons.check_rounded,
+                      size: 9,
+                      color: Colors.white,
+                    )
                   : null,
             ),
           ],

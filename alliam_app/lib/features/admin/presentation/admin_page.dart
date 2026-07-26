@@ -15,14 +15,19 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   final _service = AdminService();
-  final _player = AudioPlayer();
+  AudioPlayer _player = AudioPlayer();
   late Future<bool> _access;
   List<AdminWordAudio> _words = const [];
   List<AdminLearner> _learners = const [];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMoreWords = false;
   int _section = 0;
   String? _busyId;
+  String? _playingId;
   String? _loadError;
+  String _nextWordCursor = '';
+  int _playRevision = 0;
 
   @override
   void initState() {
@@ -50,12 +55,42 @@ class _AdminPageState extends State<AdminPage> {
       setState(() {
         _words = overview.words;
         _learners = overview.learners;
+        _nextWordCursor = overview.nextWordCursor;
+        _hasMoreWords = overview.hasMoreWords;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() => _loadError = _friendlyError(error));
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadMoreWords() async {
+    if (_loadingMore || !_hasMoreWords || _nextWordCursor.isEmpty) return;
+    setState(() {
+      _loadingMore = true;
+      _loadError = null;
+    });
+    try {
+      final overview = await _service.loadOverview(
+        wordCursor: _nextWordCursor,
+        includeLearners: false,
+      );
+      if (!mounted) return;
+      final existingIds = _words.map((word) => word.id).toSet();
+      setState(() {
+        _words = [
+          ..._words,
+          ...overview.words.where((word) => existingIds.add(word.id)),
+        ];
+        _nextWordCursor = overview.nextWordCursor;
+        _hasMoreWords = overview.hasMoreWords;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _loadError = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -80,12 +115,39 @@ class _AdminPageState extends State<AdminPage> {
 
   Future<void> _play(AdminWordAudio word) async {
     if (word.storagePath.isEmpty) return;
-    setState(() => _busyId = word.id);
+    final revision = ++_playRevision;
+    if (_playingId == word.id) {
+      setState(() => _playingId = null);
+      await _player.stop();
+      return;
+    }
+    final previousPlayer = _player;
+    final selectedPlayer = AudioPlayer();
+    _player = selectedPlayer;
+    setState(() => _playingId = word.id);
     try {
-      await _player.setUrl(await _service.audioUrl(word.storagePath));
-      await _player.play();
+      await previousPlayer.stop();
+      await previousPlayer.dispose();
+      final url = await _service.audioUrl(word.storagePath);
+      if (revision != _playRevision) return;
+      await selectedPlayer.setAudioSource(
+        AudioSource.uri(Uri.parse(url), tag: word.id),
+        initialPosition: Duration.zero,
+        preload: true,
+      );
+      if (revision != _playRevision) return;
+      await selectedPlayer.seek(Duration.zero);
+      await selectedPlayer.play();
+    } catch (_) {
+      if (mounted && revision == _playRevision) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${word.word} could not be played.')),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _busyId = null);
+      if (mounted && revision == _playRevision) {
+        setState(() => _playingId = null);
+      }
     }
   }
 
@@ -172,7 +234,9 @@ class _AdminPageState extends State<AdminPage> {
                 children: [
                   ChoiceChip(
                     selected: _section == 0,
-                    label: Text('Word audio (${_words.length})'),
+                    label: Text(
+                      'Word audio (${_words.length}${_hasMoreWords ? '+' : ''})',
+                    ),
                     onSelected: (_) => setState(() => _section = 0),
                   ),
                   ChoiceChip(
@@ -196,8 +260,12 @@ class _AdminPageState extends State<AdminPage> {
                 _WordAudioList(
                   words: _words,
                   busyId: _busyId,
+                  playingId: _playingId,
+                  hasMore: _hasMoreWords,
+                  loadingMore: _loadingMore,
                   onPlay: _play,
                   onApprove: _approve,
+                  onLoadMore: _loadMoreWords,
                 )
               else
                 _LearnerList(
@@ -242,14 +310,22 @@ class _WordAudioList extends StatelessWidget {
   const _WordAudioList({
     required this.words,
     required this.busyId,
+    required this.playingId,
+    required this.hasMore,
+    required this.loadingMore,
     required this.onPlay,
     required this.onApprove,
+    required this.onLoadMore,
   });
 
   final List<AdminWordAudio> words;
   final String? busyId;
+  final String? playingId;
+  final bool hasMore;
+  final bool loadingMore;
   final ValueChanged<AdminWordAudio> onPlay;
   final ValueChanged<AdminWordAudio> onApprove;
+  final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -258,11 +334,15 @@ class _WordAudioList extends StatelessWidget {
         for (final word in words)
           ListTile(
             leading: IconButton(
-              tooltip: 'Play ${word.word}',
-              onPressed: word.storagePath.isEmpty || busyId != null
-                  ? null
-                  : () => onPlay(word),
-              icon: const Icon(Icons.play_arrow_rounded),
+              tooltip: playingId == word.id
+                  ? 'Stop ${word.word}'
+                  : 'Play ${word.word}',
+              onPressed: word.storagePath.isEmpty ? null : () => onPlay(word),
+              icon: Icon(
+                playingId == word.id
+                    ? Icons.stop_circle_outlined
+                    : Icons.play_arrow_rounded,
+              ),
             ),
             title: Text(word.word),
             subtitle: Text(
@@ -288,6 +368,20 @@ class _WordAudioList extends StatelessWidget {
                           )
                         : const Text('Approve'),
                   ),
+          ),
+        if (hasMore)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: OutlinedButton.icon(
+              onPressed: loadingMore ? null : onLoadMore,
+              icon: loadingMore
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.expand_more_rounded),
+              label: Text(loadingMore ? 'Loading…' : 'Load 25 more'),
+            ),
           ),
       ],
     ),

@@ -261,13 +261,33 @@ void main() {
         'profiles': <Map<String, dynamic>>[],
       },
     );
-    expect(school.session.role, AccountRole.school);
+    expect(school.session.role, AccountRole.organization);
     expect(school.session.ownerName, 'Amina Admin');
     expect(school.session.schoolName, 'Alliam Academy');
 
     for (final session in [student, parent, school]) {
       expect(session.session.onboardingComplete, isTrue);
     }
+
+    final migratedOrganization = await primaryStore
+        .doc('accounts/${school.uid}')
+        .get();
+    expect(migratedOrganization.data()?['schemaVersion'], 3);
+    expect(migratedOrganization.data()?['role'], 'organization');
+    expect(migratedOrganization.data()?['organizationId'], school.uid);
+    final organization = await primaryStore
+        .doc('organizations/${school.uid}')
+        .get();
+    expect(organization.data()?['ownerUid'], school.uid);
+    expect(organization.data()?['name'], 'Alliam Academy');
+    final ownerMembership = await primaryStore
+        .doc('organizations/${school.uid}/members/${school.uid}')
+        .get();
+    expect(ownerMembership.data()?['role'], 'owner');
+    expect(
+      ownerMembership.data()?['permissions']?['manageCompetitions'],
+      isTrue,
+    );
 
     await primaryAuth.signInWithEmailAndPassword(
       email: 'legacy-parent-$stamp@alliam.test',
@@ -276,7 +296,7 @@ void main() {
     final migratedParent = await primaryStore
         .doc('accounts/${parent.uid}')
         .get();
-    expect(migratedParent.data()?['schemaVersion'], 2);
+    expect(migratedParent.data()?['schemaVersion'], 3);
     expect(migratedParent.data()?['role'], 'parent');
     final normalizedLearner = await primaryStore
         .doc('accounts/${parent.uid}/learners/legacy-child')
