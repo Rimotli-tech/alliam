@@ -10,6 +10,7 @@ import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/theme/alliam_colors.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/widgets/alliam_logo.dart';
+import '../../../core/widgets/account_menu_button.dart';
 import '../../auth/data/account_repository.dart';
 import '../../auth/domain/account_session.dart';
 import '../../settings/data/settings_repository.dart';
@@ -57,29 +58,6 @@ class _PathwayPageState extends State<PathwayPage> {
           child: Stack(
             children: [
               const Positioned(left: 18, top: 12, child: AlliamLogo(width: 98)),
-              Positioned(
-                right: 18,
-                top: 8,
-                child: IconButton(
-                  tooltip: 'Profile',
-                  onPressed: () => context.go('/profile'),
-                  icon: const Icon(Icons.person_outline_rounded),
-                  color: AlliamColors.coral,
-                  style: IconButton.styleFrom(
-                    backgroundColor: AlliamColors.surfaceStrong,
-                    side: const BorderSide(color: AlliamColors.line),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 18,
-                bottom: 16,
-                child: TextButton.icon(
-                  onPressed: () => context.go('/home'),
-                  icon: const Icon(Icons.grid_view_rounded),
-                  label: const Text('Explore'),
-                ),
-              ),
               Positioned.fill(
                 child:
                     FutureBuilder<
@@ -98,6 +76,27 @@ class _PathwayPageState extends State<PathwayPage> {
                         );
                       },
                     ),
+              ),
+              Positioned(
+                left: 18,
+                bottom: 16,
+                child: TextButton.icon(
+                  onPressed: () => context.go('/home'),
+                  icon: const Icon(Icons.grid_view_rounded),
+                  label: const Text('Explore'),
+                ),
+              ),
+              Positioned(
+                right: 18,
+                top: 8,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AlliamColors.surfaceStrong,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AlliamColors.line),
+                  ),
+                  child: const AccountMenuButton(),
+                ),
               ),
             ],
           ),
@@ -141,9 +140,9 @@ class _PathContent extends StatelessWidget {
                 children: [
                   Text(
                     'Welcome back, ${learner?.name ?? data.session.firstName}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AlliamColors.text,
-                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: AlliamColors.text),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -252,9 +251,7 @@ class _PathStop extends StatelessWidget {
               ),
             ),
           Align(
-            alignment: alignRight
-                ? Alignment.topRight
-                : Alignment.topLeft,
+            alignment: alignRight ? Alignment.topRight : Alignment.topLeft,
             child: Semantics(
               button: current,
               label: '${stage.label} stage',
@@ -271,9 +268,7 @@ class _PathStop extends StatelessWidget {
                         : AlliamColors.surface,
                     borderRadius: BorderRadius.circular(34),
                     border: Border.all(
-                      color: current
-                          ? AlliamColors.coral
-                          : AlliamColors.line,
+                      color: current ? AlliamColors.coral : AlliamColors.line,
                       width: current ? 3 : 2,
                     ),
                     boxShadow: const [

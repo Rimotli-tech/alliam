@@ -11,6 +11,7 @@ import '../../../core/audio/sound_effects_service.dart';
 import '../../../core/widgets/alliam_background.dart';
 import '../../../core/widgets/alliam_card.dart';
 import '../../../core/widgets/alliam_logo.dart';
+import '../../../core/widgets/account_menu_button.dart';
 import '../../auth/data/account_repository.dart';
 import '../../auth/domain/account_session.dart';
 
@@ -39,25 +40,6 @@ class HomePage extends StatelessWidget {
                     left: 8,
                     top: 10,
                     child: const AlliamLogo(width: 102),
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 6,
-                    child: IconButton(
-                      tooltip: 'Profile',
-                      onPressed: () => context.go('/profile'),
-                      icon: const Icon(
-                        Icons.person_outline_rounded,
-                        color: AlliamColors.coral,
-                        size: 20,
-                      ),
-                      style: IconButton.styleFrom(
-                        backgroundColor: AlliamColors.surfaceStrong.withValues(
-                          alpha: 0.75,
-                        ),
-                        side: const BorderSide(color: AlliamColors.line),
-                      ),
-                    ),
                   ),
                   Positioned.fill(
                     child: LayoutBuilder(
@@ -205,6 +187,20 @@ class HomePage extends StatelessWidget {
                           ),
                         );
                       },
+                    ),
+                  ),
+                  Positioned(
+                    right: 12,
+                    top: 6,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AlliamColors.surfaceStrong.withValues(
+                          alpha: 0.9,
+                        ),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AlliamColors.line),
+                      ),
+                      child: const AccountMenuButton(),
                     ),
                   ),
                 ],

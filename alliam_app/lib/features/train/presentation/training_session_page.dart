@@ -329,6 +329,13 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       if (!correct && widget.mode == TrainingMode.survivalRun) _lives--;
       _phase = _SessionPhase.feedback;
     });
+    if (_index == _sessionWords.length - 1) {
+      final run = _runId;
+      await _wait(const Duration(milliseconds: 850), run);
+      if (!_valid(run)) return;
+      await _recordProgress();
+      if (mounted) setState(() => _phase = _SessionPhase.complete);
+    }
   }
 
   Future<void> _next() async {
@@ -652,67 +659,64 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     final copy = switch (widget.mode) {
       TrainingMode.hearAndSpell => (
         'Listen carefully',
-        'Study the word, hear it pronounced and spelled, then try it yourself',
+        'Hear it. Study it. Spell it.',
       ),
       TrainingMode.wordFlash => (
         'Word Flash',
-        'Watch closely. The word will appear briefly, then disappear.',
+        'See it briefly. Spell from memory.',
       ),
       TrainingMode.timedDrill => (
         'Timed Drill',
-        'Hear the word once, then spell it before the clock expires.',
+        'Spell accurately against the clock.',
       ),
       TrainingMode.listenAndSpell => (
         'Listen & Spell',
-        'You will hear the word only. Hold it in memory, then spell.',
+        'Hear it once. Spell from memory.',
       ),
       TrainingMode.missingLetters => (
         'Missing Letters',
-        'Study the pattern and complete the hidden letters.',
+        'Complete the hidden letters.',
       ),
       TrainingMode.patternDrill => (
         'Pattern Drill',
-        'Use the recurring spelling pattern to complete each word.',
+        'Master a recurring spelling pattern.',
       ),
       TrainingMode.similarWords => (
         'Similar Words',
-        'Use the meaning to separate commonly confused spellings.',
+        'Separate commonly confused spellings.',
       ),
       TrainingMode.buildTheWord => (
         'Build the Word',
-        'Rearrange the letter pieces into the correct spelling.',
+        'Build the spelling from its pieces.',
       ),
-      TrainingMode.mockBee => (
-        'Mock Bee',
-        'One word, one attempt. Think carefully before you submit.',
-      ),
+      TrainingMode.mockBee => ('Mock Bee', 'One word. One careful attempt.'),
       TrainingMode.survivalRun => (
         'Survival Run',
-        'You have three lives. Keep spelling for as long as you can.',
+        'Three lives. Keep spelling.',
       ),
       TrainingMode.streakChallenge => (
         'Streak Challenge',
-        'Stay accurate and protect your longest correct streak.',
+        'Protect your longest correct streak.',
       ),
       TrainingMode.recallLadder => (
         'Recall Ladder',
-        'Each correct answer raises the difficulty and the pressure.',
+        'Climb as recall gets harder.',
       ),
       TrainingMode.dailyChallenge => (
         'Daily Challenge',
-        'Complete today’s shared five-word challenge.',
+        'Complete today’s shared word set.',
       ),
       TrainingMode.themeChallenge => (
         'Theme Challenge',
-        'Use the word clues to work through a focused collection.',
+        'Spell through a focused collection.',
       ),
       TrainingMode.reverseSpell => (
         'Reverse Spell',
-        'Hear the letters in sequence, then identify the complete word.',
+        'Hear the letters. Name the word.',
       ),
       TrainingMode.missedWords => (
         'Missed Words',
-        'Return to difficult words and turn them into strengths.',
+        'Turn difficult words into strengths.',
       ),
     };
     return Center(
@@ -746,43 +750,43 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
               child: Column(
                 children: [
                   Container(
-                    width: 104,
-                    height: 104,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.58),
-                      borderRadius: BorderRadius.circular(34),
-                      border: Border.all(
-                        color: const Color(0xFFFDDAB9),
-                        width: 2,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x3DD7B69B),
-                          blurRadius: 65,
-                          offset: Offset(18, 28),
+                          width: 104,
+                          height: 104,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.58),
+                            borderRadius: BorderRadius.circular(34),
+                            border: Border.all(
+                              color: const Color(0xFFFDDAB9),
+                              width: 2,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x3DD7B69B),
+                                blurRadius: 65,
+                                offset: Offset(18, 28),
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            '$_countdown',
+                            style: const TextStyle(
+                              color: AlliamColors.coral,
+                              fontSize: 54,
+                              height: 1,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
-                    child: Text(
-                      '$_countdown',
-                      style: const TextStyle(
-                        color: AlliamColors.coral,
-                        fontSize: 54,
-                        height: 1,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'STARTING IN',
-                    style: TextStyle(
-                      color: AlliamColors.text,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.32,
-                    ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'STARTING IN',
+                          style: TextStyle(
+                            color: AlliamColors.text,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.32,
+                          ),
                   ),
                 ],
               ),
@@ -1249,7 +1253,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       promoted: promoted,
       bestStreak: widget.mode == TrainingMode.streakChallenge ? _streak : null,
       onAgain: _loadSession,
-      onLeave: () => context.go('/train'),
+      onLeave: () => context.go('/pathway'),
     );
   }
 
@@ -1831,12 +1835,12 @@ class _MilestonePayoff extends StatelessWidget {
                 runSpacing: 12,
                 children: [
                   OutlinedButton(
-                    onPressed: onAgain,
-                    child: const Text('Train again'),
+                    onPressed: onLeave,
+                    child: const Text('Pathway'),
                   ),
                   FilledButton(
-                    onPressed: onLeave,
-                    child: const Text('Continue journey'),
+                    onPressed: onAgain,
+                    child: const Text('Next session'),
                   ),
                 ],
               ),
