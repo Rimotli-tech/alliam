@@ -12,6 +12,7 @@ import '../../../core/widgets/alliam_background.dart';
 import '../../../core/audio/background_music_service.dart';
 import '../../../core/audio/sound_effects_service.dart';
 import '../../auth/data/account_repository.dart';
+import '../../auth/domain/account_session.dart';
 import '../../settings/data/settings_repository.dart';
 import '../data/training_audio_service.dart';
 import '../data/training_progress_repository.dart';
@@ -76,6 +77,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   String _patternFocus = 'Automatic';
   TrainingSessionOutcome? _outcome;
   bool _progressRecorded = false;
+  TrainingMode? _introModeShown;
+  AccountSession? _accountSession;
 
   SpellingWord? get _current =>
       _sessionWords.isEmpty ? null : _sessionWords[_index];
@@ -131,14 +134,17 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       final preferences = await _settings.load();
       final user = FirebaseAuth.instance.currentUser;
       var pathwayLevel = preferences.level;
-      if (user != null && preferences.automaticPathway) {
+      if (user != null) {
         final session = await AccountRepository(
           FirebaseFirestore.instance,
         ).load(user);
+        _accountSession = session;
         _learnerName = session.activeLearnerName.trim().split(' ').first;
-        pathwayLevel = LearnerPathway.stage(
-          session.activeLearner?.journey['stage']?.toString(),
-        ).wordLevel;
+        if (preferences.automaticPathway) {
+          pathwayLevel = LearnerPathway.stage(
+            session.activeLearner?.journey['stage']?.toString(),
+          ).wordLevel;
+        }
       }
       final module = preferences.module(widget.mode.slug);
       _level = pathwayLevel;
@@ -162,6 +168,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
 
   Future<void> _prepareCurrent({required bool firstWord, int? run}) async {
     final activeRun = run ?? ++_runId;
+    final showModeIntro = firstWord && _introModeShown != widget.mode;
     _timer?.cancel();
     _answer.clear();
     _typedLength = 0;
@@ -171,18 +178,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     _usedTileIndices.clear();
     _usedTileOrder.clear();
     setState(() {
-      _phase = firstWord ? _SessionPhase.intro : _SessionPhase.teaching;
+      _phase = showModeIntro ? _SessionPhase.intro : _SessionPhase.teaching;
       _activeSpellingLetter = -1;
     });
 
-    if (firstWord) {
-      await _wait(
-        widget.mode == TrainingMode.hearAndSpell
-            ? const Duration(milliseconds: 500)
-            : const Duration(seconds: 2),
-        activeRun,
-      );
-    } else {
+    if (showModeIntro) {
+      await _wait(const Duration(milliseconds: 3500), activeRun);
+      if (!_valid(activeRun)) return;
+      _introModeShown = widget.mode;
+    } else if (!firstWord) {
       await _wait(const Duration(milliseconds: 550), activeRun);
     }
     if (!_valid(activeRun)) return;
@@ -333,8 +337,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       final run = _runId;
       await _wait(const Duration(milliseconds: 850), run);
       if (!_valid(run)) return;
-      await _recordProgress();
-      if (mounted) setState(() => _phase = _SessionPhase.complete);
+      setState(() => _phase = _SessionPhase.complete);
+      unawaited(_recordProgress());
     }
   }
 
@@ -374,133 +378,210 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     var count = _wordCount;
     var missingVariant = _missingVariant;
     var patternFocus = _patternFocus;
-    final changed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AlliamColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) => SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                26,
-                24,
-                26,
-                24 + MediaQuery.viewInsetsOf(context).bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Session settings',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: AlliamColors.coral,
-                      fontWeight: FontWeight.w700,
+    final learners = _accountSession?.learners ?? const <LearnerProfile>[];
+    var selectedLearnerId =
+        _accountSession?.activeLearnerId ??
+        (learners.isEmpty ? null : learners.first.id);
+
+    Widget settingsContent(BuildContext modalContext) {
+      return StatefulBuilder(
+        builder: (context, setModalState) => SafeArea(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              26,
+              24,
+              26,
+              24 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Session settings',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(
+                              color: AlliamColors.coral,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.route_outlined),
-                    title: Text(_level),
-                    subtitle: const Text(
-                      'Word level follows the learner pathway',
+                    IconButton(
+                      tooltip: 'Close settings',
+                      onPressed: () => Navigator.pop(modalContext, false),
+                      icon: const Icon(Icons.close_rounded),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<int>(
-                    initialValue: count,
-                    decoration: const InputDecoration(labelText: 'Words'),
-                    items: const [
-                      DropdownMenuItem(value: 5, child: Text('5 words')),
-                      DropdownMenuItem(value: 10, child: Text('10 words')),
-                      DropdownMenuItem(value: 15, child: Text('15 words')),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                if (learners.isNotEmpty) ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedLearnerId,
+                    decoration: const InputDecoration(
+                      labelText: 'Learner',
+                      prefixIcon: Icon(Icons.person_outline_rounded),
+                    ),
+                    items: [
+                      for (final learner in learners)
+                        DropdownMenuItem(
+                          value: learner.id,
+                          child: Text('${learner.avatar}  ${learner.name}'),
+                        ),
                     ],
                     onChanged: (value) =>
-                        setSheetState(() => count = value ?? count),
+                        setModalState(() => selectedLearnerId = value),
                   ),
-                  if (widget.mode == TrainingMode.missingLetters) ...[
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: missingVariant,
-                      decoration: const InputDecoration(
-                        labelText: 'Missing letters',
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'One letter',
-                          child: Text('One letter'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Multiple letters',
-                          child: Text('Multiple letters'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Vowels only',
-                          child: Text('Vowels only'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Difficult letters',
-                          child: Text('Difficult letters'),
-                        ),
-                      ],
-                      onChanged: (value) => setSheetState(
-                        () => missingVariant = value ?? missingVariant,
-                      ),
-                    ),
+                  const SizedBox(height: 14),
+                ],
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.route_outlined),
+                  title: Text(_level),
+                  subtitle: const Text(
+                    'Word level follows the learner pathway',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<int>(
+                  initialValue: count,
+                  decoration: const InputDecoration(labelText: 'Words'),
+                  items: const [
+                    DropdownMenuItem(value: 5, child: Text('5 words')),
+                    DropdownMenuItem(value: 10, child: Text('10 words')),
+                    DropdownMenuItem(value: 15, child: Text('15 words')),
                   ],
-                  if (widget.mode == TrainingMode.patternDrill) ...[
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: patternFocus,
-                      decoration: const InputDecoration(labelText: 'Pattern'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'Automatic',
-                          child: Text('Automatic'),
-                        ),
-                        DropdownMenuItem(value: '-tion', child: Text('-tion')),
-                        DropdownMenuItem(value: '-sion', child: Text('-sion')),
-                        DropdownMenuItem(
-                          value: 'Silent letters',
-                          child: Text('Silent letters'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Double consonants',
-                          child: Text('Double consonants'),
-                        ),
-                      ],
-                      onChanged: (value) => setSheetState(
-                        () => patternFocus = value ?? patternFocus,
-                      ),
+                  onChanged: (value) =>
+                      setModalState(() => count = value ?? count),
+                ),
+                if (widget.mode == TrainingMode.missingLetters) ...[
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: missingVariant,
+                    decoration: const InputDecoration(
+                      labelText: 'Missing letters',
                     ),
-                  ],
-                  const SizedBox(height: 22),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('Apply and restart'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'One letter',
+                        child: Text('One letter'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Multiple letters',
+                        child: Text('Multiple letters'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Vowels only',
+                        child: Text('Vowels only'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Difficult letters',
+                        child: Text('Difficult letters'),
+                      ),
+                    ],
+                    onChanged: (value) => setModalState(
+                      () => missingVariant = value ?? missingVariant,
+                    ),
                   ),
                 ],
-              ),
+                if (widget.mode == TrainingMode.patternDrill) ...[
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: patternFocus,
+                    decoration: const InputDecoration(labelText: 'Pattern'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Automatic',
+                        child: Text('Automatic'),
+                      ),
+                      DropdownMenuItem(value: '-tion', child: Text('-tion')),
+                      DropdownMenuItem(value: '-sion', child: Text('-sion')),
+                      DropdownMenuItem(
+                        value: 'Silent letters',
+                        child: Text('Silent letters'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Double consonants',
+                        child: Text('Double consonants'),
+                      ),
+                    ],
+                    onChanged: (value) => setModalState(
+                      () => patternFocus = value ?? patternFocus,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 22),
+                FilledButton(
+                  onPressed: () => Navigator.pop(modalContext, true),
+                  child: const Text('Apply and restart'),
+                ),
+              ],
             ),
           ),
-        );
-      },
-    );
+        ),
+      );
+    }
+
+    final desktop = MediaQuery.sizeOf(context).width >= 700;
+    bool? changed;
+    if (desktop) {
+      changed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => Dialog(
+          backgroundColor: AlliamColors.surface,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(32),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+            side: const BorderSide(color: AlliamColors.line),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: settingsContent(dialogContext),
+          ),
+        ),
+      );
+    } else {
+      changed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: AlliamColors.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        builder: settingsContent,
+      );
+    }
+
     if (changed == true) {
-      _wordCount = count;
-      _missingVariant = missingVariant;
-      _patternFocus = patternFocus;
-      await _settings.saveModule(widget.mode.slug, {
-        'wordCount': count,
-        'missingVariant': missingVariant,
-        'patternFocus': patternFocus,
-      });
-      await _loadSession();
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null &&
+            selectedLearnerId != null &&
+            selectedLearnerId != _accountSession?.activeLearnerId) {
+          await AccountRepository(
+            FirebaseFirestore.instance,
+          ).setActiveLearner(user, selectedLearnerId!);
+        }
+        _wordCount = count;
+        _missingVariant = missingVariant;
+        _patternFocus = patternFocus;
+        await _settings.saveModule(widget.mode.slug, {
+          'wordCount': count,
+          'missingVariant': missingVariant,
+          'patternFocus': patternFocus,
+        });
+        await _loadSession();
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Session settings could not be applied. Try again.'),
+          ),
+        );
+      }
     }
   }
 
@@ -615,9 +696,9 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
             icon: const Icon(Icons.home_outlined),
           ),
           const Spacer(),
-          Text(
-            '${_sessionWords.isEmpty ? 0 : _index + 1}/${_sessionWords.length}',
-            style: Theme.of(context).textTheme.labelLarge,
+          _SessionProgress(
+            current: _sessionWords.isEmpty ? 0 : _index,
+            total: _sessionWords.length,
           ),
           const Spacer(),
           _SessionIconButton(
@@ -659,66 +740,70 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     final copy = switch (widget.mode) {
       TrainingMode.hearAndSpell => (
         'Listen carefully',
-        'Hear it. Study it. Spell it.',
+        'Listen, study the word, then spell it yourself.',
       ),
       TrainingMode.wordFlash => (
         'Word Flash',
-        'See it briefly. Spell from memory.',
+        'Study the word briefly, then spell it from memory.',
       ),
       TrainingMode.timedDrill => (
         'Timed Drill',
-        'Spell accurately against the clock.',
+        'Listen once, then spell the word before time runs out.',
       ),
       TrainingMode.listenAndSpell => (
         'Listen & Spell',
-        'Hear it once. Spell from memory.',
+        'Listen to the word, then spell it from memory.',
       ),
       TrainingMode.missingLetters => (
         'Missing Letters',
-        'Complete the hidden letters.',
+        'Complete the word by filling in its hidden letters.',
       ),
       TrainingMode.patternDrill => (
         'Pattern Drill',
-        'Master a recurring spelling pattern.',
+        'Use the recurring pattern to complete the spelling.',
       ),
       TrainingMode.similarWords => (
         'Similar Words',
-        'Separate commonly confused spellings.',
+        'Use the clue to choose the correct spelling.',
       ),
       TrainingMode.buildTheWord => (
         'Build the Word',
-        'Build the spelling from its pieces.',
+        'Arrange the letter pieces to build the correct word.',
       ),
-      TrainingMode.mockBee => ('Mock Bee', 'One word. One careful attempt.'),
+      TrainingMode.mockBee => (
+        'Mock Bee',
+        'Listen carefully and spell each word in one attempt.',
+      ),
       TrainingMode.survivalRun => (
         'Survival Run',
-        'Three lives. Keep spelling.',
+        'Keep spelling correctly for as long as your three lives last.',
       ),
       TrainingMode.streakChallenge => (
         'Streak Challenge',
-        'Protect your longest correct streak.',
+        'Spell each word correctly to build your longest streak.',
       ),
       TrainingMode.recallLadder => (
         'Recall Ladder',
-        'Climb as recall gets harder.',
+        'Recall each spelling as the challenge becomes harder.',
       ),
       TrainingMode.dailyChallenge => (
         'Daily Challenge',
-        'Complete today’s shared word set.',
+        'Complete today’s shared set of spelling words.',
       ),
       TrainingMode.themeChallenge => (
         'Theme Challenge',
-        'Spell through a focused collection.',
+        'Use each clue to spell words from the featured theme.',
       ),
       TrainingMode.reverseSpell => (
         'Reverse Spell',
-        'Hear the letters. Name the word.',
+        'Listen to the letters, then identify the complete word.',
       ),
       TrainingMode.missedWords => (
         'Missed Words',
-        'Turn difficult words into strengths.',
+        'Practise previously missed words until they become strengths.',
       ),
     };
+    final showingCountdown = _phase == _SessionPhase.countdown;
     return Center(
       key: const ValueKey('intro'),
       child: Padding(
@@ -726,71 +811,65 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              copy.$1,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                color: AlliamColors.coral,
-                fontWeight: FontWeight.w700,
-                fontSize: 54,
-                height: 1.1,
-                letterSpacing: -1.8,
+            if (!showingCountdown) ...[
+              Text(
+                copy.$1,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                  color: AlliamColors.coral,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 54,
+                  height: 1.1,
+                  letterSpacing: -1.8,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              copy.$2,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 34),
-            AnimatedOpacity(
-              opacity: _phase == _SessionPhase.countdown ? 1 : 0,
-              duration: const Duration(milliseconds: 250),
-              child: Column(
-                children: [
-                  Container(
-                          width: 104,
-                          height: 104,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.58),
-                            borderRadius: BorderRadius.circular(34),
-                            border: Border.all(
-                              color: const Color(0xFFFDDAB9),
-                              width: 2,
-                            ),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x3DD7B69B),
-                                blurRadius: 65,
-                                offset: Offset(18, 28),
-                              ),
-                            ],
-                          ),
-                          child: Text(
-                            '$_countdown',
-                            style: const TextStyle(
-                              color: AlliamColors.coral,
-                              fontSize: 54,
-                              height: 1,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'STARTING IN',
-                          style: TextStyle(
-                            color: AlliamColors.text,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.32,
-                          ),
+              const SizedBox(height: 16),
+              Text(
+                copy.$2,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ] else ...[
+              Container(
+                width: 104,
+                height: 104,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.58),
+                  borderRadius: BorderRadius.circular(34),
+                  border: Border.all(
+                    color: const Color(0xFFFDDAB9),
+                    width: 2,
                   ),
-                ],
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x3DD7B69B),
+                      blurRadius: 65,
+                      offset: Offset(18, 28),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  '$_countdown',
+                  style: const TextStyle(
+                    color: AlliamColors.coral,
+                    fontSize: 54,
+                    height: 1,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(height: 12),
+              const Text(
+                'STARTING IN',
+                style: TextStyle(
+                  color: AlliamColors.text,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.32,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -819,23 +898,36 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         ? 'Name the word'
         : 'Your turn';
 
-    return GestureDetector(
-      key: ValueKey('exercise-$_index'),
-      behavior: HitTestBehavior.translucent,
-      onTap: () {
-        if (_phase != _SessionPhase.attempt ||
-            _answer.text.length >= _current!.word.length) {
-          return;
-        }
-        _focus.requestFocus();
-        SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): () {
+          if (_phase == _SessionPhase.attempt && _answer.text.isNotEmpty) {
+            unawaited(_submit());
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): () {
+          if (_phase == _SessionPhase.attempt && _answer.text.isNotEmpty) {
+            unawaited(_submit());
+          }
+        },
       },
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 18, 24, 40),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 980),
-            child: Column(
+      child: GestureDetector(
+        key: ValueKey('exercise-$_index'),
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          if (_phase != _SessionPhase.attempt ||
+              _answer.text.length >= _current!.word.length) {
+            return;
+          }
+          _focus.requestFocus();
+          SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+        },
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 18, 24, 40),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 980),
+              child: Column(
               children: [
                 if (_phase == _SessionPhase.attempt &&
                     widget.mode != TrainingMode.similarWords &&
@@ -874,12 +966,6 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                           }
                           _typedLength = value.length;
                           setState(() {});
-                          if (value.length >= _current!.word.length) {
-                            _focus.unfocus();
-                            SystemChannels.textInput.invokeMethod<void>(
-                              'TextInput.hide',
-                            );
-                          }
                         },
                         onSubmitted: (_) {
                           if (_answer.text.isNotEmpty) unawaited(_submit());
@@ -972,6 +1058,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                   ),
                 ),
               ],
+              ),
             ),
           ),
         ),
@@ -1157,6 +1244,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                 ),
                 if (widget.mode == TrainingMode.hearAndSpell)
                   Listener(
+                    behavior: HitTestBehavior.opaque,
                     onPointerDown: (_) {
                       if (_flashUsed) return;
                       setState(() {
@@ -1212,14 +1300,17 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     }
 
     if (feedback) {
+      if (_index == _sessionWords.length - 1) {
+        return const SizedBox(width: 164, height: 60);
+      }
       return SizedBox(
         width: 164,
         height: 60,
         child: FilledButton(
           onPressed: _next,
-          child: Text(
-            _index == _sessionWords.length - 1 ? 'View results' : 'Next word',
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          child: const Text(
+            'Next word',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
           ),
         ),
       );
@@ -1512,6 +1603,65 @@ class _Clock extends StatelessWidget {
           color: Colors.white,
           fontWeight: FontWeight.w800,
         ),
+      ),
+    );
+  }
+}
+
+class _SessionProgress extends StatelessWidget {
+  const _SessionProgress({required this.current, required this.total});
+
+  final int current;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    if (total == 0) return const SizedBox(width: 96, height: 18);
+    return Semantics(
+      label: 'Word ${current + 1} of $total',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var index = 0; index < total; index++) ...[
+            if (index > 0)
+              Container(
+                width: 18,
+                height: 2,
+                color: index <= current
+                    ? AlliamColors.coral
+                    : AlliamColors.line,
+              ),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              width: index == current ? 18 : 12,
+              height: index == current ? 18 : 12,
+              decoration: BoxDecoration(
+                color: index < current
+                    ? AlliamColors.coral
+                    : AlliamColors.surfaceStrong,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: index <= current
+                      ? AlliamColors.coral
+                      : AlliamColors.line,
+                  width: index == current ? 3 : 2,
+                ),
+                boxShadow: index == current
+                    ? const [
+                        BoxShadow(
+                          color: Color(0x33FF684D),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: index < current
+                  ? const Icon(Icons.check_rounded, size: 9, color: Colors.white)
+                  : null,
+            ),
+          ],
+        ],
       ),
     );
   }

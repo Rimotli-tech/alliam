@@ -18,6 +18,8 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   late Future<AccountSession> _session;
+  String? _selectedLearnerId;
+  String? _switchingLearnerId;
 
   User get _user => FirebaseAuth.instance.currentUser!;
   AccountRepository get _repository =>
@@ -64,6 +66,9 @@ class _ProfilePageState extends State<ProfilePage> {
               if (session.role == AccountRole.parent)
                 _LearnersCard(
                   session: session,
+                  activeLearnerId:
+                      _selectedLearnerId ?? session.activeLearnerId,
+                  switchingLearnerId: _switchingLearnerId,
                   onAdd: () => _addLearner(session),
                   onView: (learner) =>
                       context.go('/profile/learner/${learner.id}'),
@@ -81,12 +86,31 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _switchLearner(LearnerProfile learner) async {
-    await _repository.setActiveLearner(_user, learner.id);
-    if (!mounted) return;
-    setState(() => _reload());
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('${learner.name} is now active.')));
+    final previousId = _selectedLearnerId;
+    setState(() {
+      _selectedLearnerId = learner.id;
+      _switchingLearnerId = learner.id;
+    });
+    try {
+      await _repository.setActiveLearner(_user, learner.id);
+      if (!mounted) return;
+      setState(() {
+        _switchingLearnerId = null;
+        _reload();
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${learner.name} is now active.')));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _selectedLearnerId = previousId;
+        _switchingLearnerId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Learner could not be switched. Try again.')),
+      );
+    }
   }
 
   Future<void> _addLearner(AccountSession session) async {
@@ -279,12 +303,16 @@ class _OwnerCard extends StatelessWidget {
 class _LearnersCard extends StatelessWidget {
   const _LearnersCard({
     required this.session,
+    required this.activeLearnerId,
+    required this.switchingLearnerId,
     required this.onAdd,
     required this.onView,
     required this.onSwitch,
   });
 
   final AccountSession session;
+  final String? activeLearnerId;
+  final String? switchingLearnerId;
   final VoidCallback onAdd;
   final ValueChanged<LearnerProfile> onView;
   final ValueChanged<LearnerProfile> onSwitch;
@@ -329,10 +357,22 @@ class _LearnersCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (session.activeLearnerId == learner.id)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 10),
-                      child: Chip(label: Text('Active')),
+                  if (activeLearnerId == learner.id)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: Chip(
+                        avatar: switchingLearnerId == learner.id
+                            ? const SizedBox.square(
+                                dimension: 13,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.check_rounded, size: 15),
+                        label: Text(
+                          switchingLearnerId == learner.id
+                              ? 'Switching'
+                              : 'Active',
+                        ),
+                      ),
                     )
                   else
                     TextButton(

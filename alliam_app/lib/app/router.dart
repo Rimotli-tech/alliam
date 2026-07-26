@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/auth/presentation/auth_gate.dart';
+import '../features/admin/presentation/admin_page.dart';
 import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/pathway/presentation/pathway_page.dart';
@@ -64,6 +65,10 @@ final alliamRouter = GoRouter(
         GoRoute(
           path: '/settings',
           builder: (context, state) => const SettingsPage(),
+        ),
+        GoRoute(
+          path: '/admin',
+          builder: (context, state) => const AdminPage(),
         ),
       ],
     ),

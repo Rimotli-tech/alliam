@@ -60,7 +60,7 @@ class AccountRepository {
       schoolName: (school['name'] ?? accountData['schoolName'] ?? '')
           .toString(),
       activeLearnerId:
-          (value['activeProfileId'] ?? accountData['activeLearnerId'])
+          (accountData['activeLearnerId'] ?? value['activeProfileId'])
               ?.toString(),
       learners: learners,
     );
@@ -181,7 +181,7 @@ class AccountRepository {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     batch.set(_state(user.uid), {
-      'value.activeProfileId': learnerId,
+      'value': {'activeProfileId': learnerId},
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     await batch.commit();

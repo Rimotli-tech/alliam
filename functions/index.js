@@ -21,6 +21,28 @@ const AUDIO_REGION = "europe-west1";
 const AUDIO_MODEL = "eleven_multilingual_v2";
 const AUDIO_VERSION = "alliam-one-v1";
 const ALPHABET_VERSION = "alliam-alphabet-v2";
+const INITIAL_ADMIN_EMAIL = "rimotli.tech@gmail.com";
+
+function requireAdmin(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
+  if (request.auth.token.admin !== true) {
+    throw new HttpsError("permission-denied", "An Alliam administrator is required.");
+  }
+}
+
+const EMPTY_JOURNEY = {
+  stage: "foundation",
+  stageLabel: "Foundation",
+  stageSessions: 0,
+  stageAccuracy: 0,
+  sessions: 0,
+  wordsPractised: 0,
+  accuracy: 0,
+  totalScore: 0,
+  reviewWords: [],
+  lastMode: null,
+  lastCompletedAt: null,
+};
 const ALPHABET_PHONEMES = {
   a: "eɪ", b: "biː", c: "siː", d: "diː", e: "iː", f: "ɛf", g: "dʒiː",
   h: "eɪtʃ", i: "aɪ", j: "dʒeɪ", k: "keɪ", l: "ɛl", m: "ɛm", n: "ɛn",
@@ -1346,4 +1368,83 @@ exports.joinPrivateRoom = onCall({ region: AUDIO_REGION }, async (request) => {
   const matchId = await createMatch(snapshot.data().ownerUid, uid, "Private 1v1", { roomCode: code });
   await ref.update({ status: "matched", matchId, joinedUid: uid, updatedAt: FieldValue.serverTimestamp() });
   return { matchId };
+});
+
+exports.bootstrapAdminRole = onCall({ region: AUDIO_REGION }, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
+  const email = String(request.auth.token.email || "").toLowerCase();
+  if (email !== INITIAL_ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "This account is not an Alliam administrator.");
+  }
+  const auth = getAuth();
+  const user = await auth.getUser(request.auth.uid);
+  await auth.setCustomUserClaims(user.uid, {
+    ...(user.customClaims || {}),
+    admin: true,
+  });
+  await getFirestore().doc(`accounts/${user.uid}`).set({
+    roles: { admin: true },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { admin: true };
+});
+
+exports.approveWordAudio = onCall({ region: AUDIO_REGION }, async (request) => {
+  requireAdmin(request);
+  const wordId = String(request.data?.wordId || "").trim().toLowerCase();
+  if (!wordId || wordId.length > 80) {
+    throw new HttpsError("invalid-argument", "A valid word ID is required.");
+  }
+  const ref = getFirestore().doc(`words/${wordId}`);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError("not-found", "Word not found.");
+  const data = snapshot.data();
+  const pronunciation = data.audio?.pronunciation;
+  if (!pronunciation?.storagePath) {
+    throw new HttpsError("failed-precondition", "This word has no pronunciation audio.");
+  }
+  await ref.set({
+    approved: true,
+    audioStatus: "approved",
+    approvalCollection: data.approvalCollection || "admin-approved-v1",
+    approvedAudio: data.audio,
+    approvedAt: FieldValue.serverTimestamp(),
+    approvedBy: request.auth.uid,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return { wordId, approved: true };
+});
+
+exports.resetLearnerProgress = onCall({ region: AUDIO_REGION }, async (request) => {
+  requireAdmin(request);
+  const accountId = String(request.data?.accountId || "").trim();
+  const learnerId = String(request.data?.learnerId || "").trim();
+  if (!accountId || !learnerId) {
+    throw new HttpsError("invalid-argument", "Account and learner IDs are required.");
+  }
+  const db = getFirestore();
+  const learnerRef = db.doc(`accounts/${accountId}/learners/${learnerId}`);
+  const learner = await learnerRef.get();
+  if (!learner.exists) throw new HttpsError("not-found", "Learner not found.");
+  const stateRef = db.doc(`accounts/${accountId}/data/app-state`);
+  const state = await stateRef.get();
+  const value = state.data()?.value || {};
+  const profiles = Array.isArray(value.profiles)
+    ? value.profiles.map((profile) => profile?.id === learnerId
+      ? { ...profile, journey: { ...EMPTY_JOURNEY } }
+      : profile)
+    : [];
+  const batch = db.batch();
+  batch.set(learnerRef, {
+    journey: { ...EMPTY_JOURNEY },
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  if (state.exists) {
+    batch.set(stateRef, {
+      value: { profiles },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+  await batch.commit();
+  return { accountId, learnerId, reset: true };
 });

@@ -4,9 +4,13 @@ service cloud.firestore {
     function ownsAccount(accountId) {
       return request.auth != null && request.auth.uid == accountId;
     }
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
 
     match /accounts/{accountId} {
-      allow read, delete: if ownsAccount(accountId);
+      allow read: if ownsAccount(accountId) || isAdmin();
+      allow delete: if ownsAccount(accountId);
       allow create: if ownsAccount(accountId) &&
         request.resource.data.uid == request.auth.uid &&
         request.resource.data.role in ['pending', 'student', 'parent', 'school'];
@@ -15,7 +19,8 @@ service cloud.firestore {
         request.resource.data.role in ['pending', 'student', 'parent', 'school'];
 
       match /{document=**} {
-        allow read, write: if ownsAccount(accountId);
+        allow read: if ownsAccount(accountId) || isAdmin();
+        allow write: if ownsAccount(accountId);
       }
     }
 
