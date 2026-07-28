@@ -341,24 +341,19 @@ class TrainingAudioService {
       _storage.ref(storagePath).getDownloadURL();
 
   Future<void> _preloadUrl(String storagePath, String resolvedUrl) async {
+    if (!kIsWeb) {
+      // Native playback can stream directly from Firebase Storage. Marking the
+      // resolved source ready avoids blocking lesson entry on a full disk-cache
+      // download, which can exceed the first-word preparation timeout.
+      _nativePreparedSources[storagePath] = AudioSource.uri(
+        Uri.parse(resolvedUrl),
+      );
+      return;
+    }
+
     final player = AudioPlayer();
     try {
-      if (kIsWeb) {
-        await player.setUrl(resolvedUrl);
-        return;
-      }
-      final cachingSource = LockCachingAudioSource(Uri.parse(resolvedUrl));
-      final downloadComplete = cachingSource.downloadProgressStream
-          .firstWhere((progress) => progress >= 1)
-          .timeout(const Duration(seconds: 20));
-      await player.setAudioSource(await cachingSource.resolve());
-      try {
-        await downloadComplete;
-      } on TimeoutException {
-        // The source is buffered and playable even if persistent completion
-        // could not be confirmed within the preparation window.
-      }
-      _nativePreparedSources[storagePath] = await cachingSource.resolve();
+      await player.setUrl(resolvedUrl);
     } finally {
       await player.dispose();
     }

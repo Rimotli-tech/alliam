@@ -73,7 +73,15 @@ service cloud.firestore {
             ownsOrganization(organizationId)) ||
           (hasOrganizationPermission(organizationId, 'manageMembers') &&
             request.resource.data.role != 'owner');
-        allow update, delete: if isAdmin() ||
+        allow update: if isAdmin() ||
+          (ownsOrganization(organizationId) &&
+            memberId == request.auth.uid &&
+            resource.data.role == 'owner' &&
+            request.resource.data.role == 'owner' &&
+            request.resource.data.uid == request.auth.uid) ||
+          (hasOrganizationPermission(organizationId, 'manageMembers') &&
+            resource.data.role != 'owner');
+        allow delete: if isAdmin() ||
           (hasOrganizationPermission(organizationId, 'manageMembers') &&
             resource.data.role != 'owner');
       }
@@ -94,6 +102,12 @@ service cloud.firestore {
         allow read: if isAdmin() || isOrganizationMember(organizationId);
         allow create, update, delete: if isAdmin() ||
           hasOrganizationPermission(organizationId, 'manageCompetitions');
+
+        match /{document=**} {
+          allow read: if isAdmin() || isOrganizationMember(organizationId);
+          allow create, update, delete: if isAdmin() ||
+            hasOrganizationPermission(organizationId, 'manageCompetitions');
+        }
       }
 
       match /invitations/{invitationId} {

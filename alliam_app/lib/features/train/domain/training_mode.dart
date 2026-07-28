@@ -77,6 +77,12 @@ extension TrainingModeDetails on TrainingMode {
 
   bool get isImplemented => true;
 
+  TrainingMode get nextLearningSession => switch (this) {
+    TrainingMode.hearAndSpell => TrainingMode.wordFlash,
+    TrainingMode.wordFlash => TrainingMode.hearAndSpell,
+    _ => this,
+  };
+
   bool get isTimed => {
     TrainingMode.timedDrill,
     TrainingMode.mockBee,

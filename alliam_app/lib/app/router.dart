@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/auth/presentation/auth_gate.dart';
@@ -7,6 +8,7 @@ import '../features/compete/presentation/compete_page.dart';
 import '../features/home/presentation/home_page.dart';
 import '../features/organization/presentation/organization_dashboard_page.dart';
 import '../features/organization/presentation/organization_management_page.dart';
+import '../features/organization/presentation/competition_workspace_page.dart';
 import '../features/pathway/presentation/pathway_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/rankings/presentation/rankings_page.dart';
@@ -71,6 +73,12 @@ final alliamRouter = GoRouter(
           builder: (context, state) => const OrganizationDashboardPage(),
         ),
         GoRoute(
+          path: '/organization/competitions/:competitionId',
+          builder: (context, state) => CompetitionWorkspacePage(
+            competitionId: state.pathParameters['competitionId']!,
+          ),
+        ),
+        GoRoute(
           path: '/organization/:section',
           builder: (context, state) => OrganizationManagementPage(
             section: state.pathParameters['section']!,
@@ -81,7 +89,14 @@ final alliamRouter = GoRouter(
     GoRoute(
       path: '/train/session/:mode',
       builder: (context, state) => TrainingSessionPage(
+        key: ValueKey(state.uri.toString()),
         mode: TrainingModeDetails.fromSlug(state.pathParameters['mode'] ?? ''),
+        reviewWords:
+            state.uri.queryParameters['words']
+                ?.split(',')
+                .where((word) => word.isNotEmpty)
+                .toList() ??
+            const [],
       ),
     ),
   ],

@@ -19,17 +19,30 @@ class BackgroundMusicService {
   int _duckCount = 0;
   int _pauseCount = 0;
   double _volumeScale = 1;
+  Future<void>? _startInFlight;
 
   double get _restingVolume =>
       (_exerciseActive ? _duckedVolume : _normalVolume) * _volumeScale;
 
-  Future<void> start() async {
+  Future<void> start() {
+    if (!_enabled) return Future<void>.value();
+    return _startInFlight ??= _start().whenComplete(() {
+      _startInFlight = null;
+    });
+  }
+
+  Future<void> _start() async {
     if (!_enabled) return;
     if (!_prepared) {
-      await _player.setAsset('assets/audio/alliam-background.mp3');
-      await _player.setLoopMode(LoopMode.one);
-      await _player.setVolume(_restingVolume);
-      _prepared = true;
+      try {
+        await _player.setAsset('assets/audio/alliam-background.mp3');
+        await _player.setLoopMode(LoopMode.one);
+        await _player.setVolume(_restingVolume);
+        _prepared = true;
+      } catch (_) {
+        // Background music must never block authentication or lesson startup.
+        return;
+      }
     }
     if (_active && _pauseCount == 0 && !_player.playing) {
       unawaited(

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/alliam_page.dart';
 import '../../auth/data/account_repository.dart';
@@ -60,11 +61,6 @@ class OrganizationManagementPage extends StatelessWidget {
             repository: repository,
             userId: user.uid,
           ),
-          'staff' => _StaffSection(
-            organizationId: data.organizationId,
-            repository: repository,
-            currentUserId: user.uid,
-          ),
           _ => const Center(child: Text('This area is not available.')),
         };
         return AlliamPage(
@@ -82,7 +78,6 @@ class OrganizationManagementPage extends StatelessWidget {
     'teams' => 'Teams',
     'competitions' => 'Competitions',
     'invitations' => 'Invitations',
-    'staff' => 'Staff & permissions',
     _ => 'Organisation',
   };
 
@@ -90,7 +85,7 @@ class OrganizationManagementPage extends StatelessWidget {
     'learners' => 'manageLearners',
     'teams' => 'manageTeams',
     'competitions' => 'manageCompetitions',
-    'invitations' || 'staff' => 'manageMembers',
+    'invitations' => 'manageMembers',
     _ => null,
   };
 
@@ -141,16 +136,30 @@ class _LearnersSection extends StatelessWidget {
     itemBuilder: (context, learner) => ListTile(
       leading: CircleAvatar(child: Text(learner.name[0].toUpperCase())),
       title: Text(learner.name),
-      subtitle: Text('${learner.grade} · ${learner.status}'),
-      trailing: PopupMenuButton<String>(
-        onSelected: (status) => repository.setLearnerStatus(
-          organizationId: organizationId,
-          learnerId: learner.id,
-          status: status,
-        ),
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'active', child: Text('Mark active')),
-          PopupMenuItem(value: 'inactive', child: Text('Mark inactive')),
+      subtitle: Text(
+        '${learner.grade} · ${_trainingTime(learner.trainingSeconds)} training · '
+        '${learner.sessions} sessions · ${learner.accuracy}% accuracy\n'
+        '${learner.wordsAttempted} words · streak ${learner.currentStreak} · '
+        '${_lastActive(learner.lastActive)} · '
+        '${learner.competitionCount} competitions',
+      ),
+      isThreeLine: true,
+      trailing: Wrap(
+        spacing: 5,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Chip(label: Text(learner.readinessLabel)),
+          PopupMenuButton<String>(
+            onSelected: (status) => repository.setLearnerStatus(
+              organizationId: organizationId,
+              learnerId: learner.id,
+              status: status,
+            ),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'active', child: Text('Mark active')),
+              PopupMenuItem(value: 'inactive', child: Text('Mark inactive')),
+            ],
+          ),
         ],
       ),
     ),
@@ -189,31 +198,56 @@ class _TeamsSection extends StatelessWidget {
             actorUid: userId,
           );
         },
-        itemBuilder: (context, team) => ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.groups_outlined)),
-          title: Text(team.name),
-          subtitle: Text(
-            '${team.learnerIds.length} learner${team.learnerIds.length == 1 ? '' : 's'}',
-          ),
-          trailing: IconButton(
-            tooltip: 'Assign learners',
-            icon: const Icon(Icons.group_add_outlined),
-            onPressed: () async {
-              final result = await _teamDialog(
-                context,
-                learners: learners,
-                name: team.name,
-                selected: team.learnerIds,
-              );
-              if (result == null) return;
-              await repository.updateTeamLearners(
-                organizationId: organizationId,
-                teamId: team.id,
-                learnerIds: result.$2,
-              );
-            },
-          ),
-        ),
+        itemBuilder: (context, team) {
+          final members = learners
+              .where((learner) => team.learnerIds.contains(learner.id))
+              .toList();
+          final totalSeconds = members.fold<int>(
+            0,
+            (total, learner) => total + learner.trainingSeconds,
+          );
+          final averageAccuracy = members.isEmpty
+              ? 0
+              : (members.fold<int>(
+                          0,
+                          (total, learner) => total + learner.accuracy,
+                        ) /
+                        members.length)
+                    .round();
+          final readiness = _teamReadiness(members, averageAccuracy);
+          return ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.groups_outlined)),
+            title: Text(team.name),
+            subtitle: Text(
+              '${members.length} members · ${_trainingTime(totalSeconds)} training · '
+              '$averageAccuracy% average accuracy',
+            ),
+            trailing: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Chip(label: Text(readiness)),
+                IconButton(
+                  tooltip: 'Assign learners',
+                  icon: const Icon(Icons.group_add_outlined),
+                  onPressed: () async {
+                    final result = await _teamDialog(
+                      context,
+                      learners: learners,
+                      name: team.name,
+                      selected: team.learnerIds,
+                    );
+                    if (result == null) return;
+                    await repository.updateTeamLearners(
+                      organizationId: organizationId,
+                      teamId: team.id,
+                      learnerIds: result.$2,
+                    );
+                  },
+                ),
+              ],
+            ),
+          );
+        },
       );
     },
   );
@@ -238,24 +272,28 @@ class _CompetitionsSection extends StatelessWidget {
     empty: 'No competitions have been created yet.',
     actionLabel: 'Create competition',
     onAction: () async {
-      final name = await _oneFieldDialog(
-        context,
-        title: 'Create competition',
-        label: 'Competition name',
-      );
-      if (name == null) return;
-      await repository.createCompetition(
+      final result = await _competitionDialog(context);
+      if (result == null) return;
+      final id = await repository.createCompetition(
         organizationId: organizationId,
-        name: name,
+        name: result.$1,
         actorUid: userId,
+        template: result.$2,
+        year: result.$3,
+        capacity: result.$4,
       );
+      if (context.mounted) {
+        context.go('/organization/competitions/$id');
+      }
     },
     itemBuilder: (context, competition) => ListTile(
       leading: const CircleAvatar(child: Icon(Icons.emoji_events_outlined)),
-      title: Text(competition.name),
+      title: Text('${competition.name} · ${competition.year}'),
       subtitle: Text(
-        '${competition.status} · ${competition.participantOrganizationIds.length} participating organisation(s)',
+        '${competition.status} · ${_managementLabel(competition.template)} · '
+        '${competition.participantOrganizationIds.length} participating organisation(s)',
       ),
+      onTap: () => context.go('/organization/competitions/${competition.id}'),
       trailing: Wrap(
         children: [
           IconButton(
@@ -276,12 +314,30 @@ class _CompetitionsSection extends StatelessWidget {
             },
           ),
           PopupMenuButton<String>(
-            onSelected: (status) => repository.setCompetitionStatus(
-              organizationId: organizationId,
-              competitionId: competition.id,
-              status: status,
-            ),
+            onSelected: (value) async {
+              if (value == 'duplicate') {
+                final id = await repository.duplicateCompetition(
+                  organizationId: organizationId,
+                  source: competition,
+                  actorUid: userId,
+                );
+                if (context.mounted) {
+                  context.go('/organization/competitions/$id');
+                }
+                return;
+              }
+              await repository.setCompetitionStatus(
+                organizationId: organizationId,
+                competitionId: competition.id,
+                status: value,
+              );
+            },
             itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'duplicate',
+                child: Text('Duplicate for next year'),
+              ),
+              PopupMenuDivider(),
               PopupMenuItem(value: 'draft', child: Text('Move to draft')),
               PopupMenuItem(
                 value: 'registration',
@@ -344,6 +400,8 @@ class _InvitationsSection extends StatelessWidget {
       );
 }
 
+// Retained for a later permissions slice; intentionally not exposed.
+// ignore: unused_element
 class _StaffSection extends StatelessWidget {
   const _StaffSection({
     required this.organizationId,
@@ -640,13 +698,13 @@ Future<(String, String, String)?> _invitationDialog(
                     value: 'organization',
                     child: Text('Participating organisation'),
                   ),
-                  DropdownMenuItem(value: 'staff', child: Text('Staff member')),
+                  DropdownMenuItem(value: 'learner', child: Text('Learner')),
                 ],
                 onChanged: (value) =>
                     setDialogState(() => kind = value ?? kind),
               ),
             ],
-            if (staffOnly || kind == 'staff') ...[
+            if (staffOnly) ...[
               const SizedBox(height: 14),
               DropdownButtonFormField<String>(
                 initialValue: role,
@@ -757,3 +815,140 @@ String _permissionLabel(String permission) => switch (permission) {
   'manageOrganization' => 'Manage organisation settings',
   _ => permission,
 };
+
+Future<(String, String, int, int)?> _competitionDialog(
+  BuildContext context,
+) async {
+  final name = TextEditingController();
+  final year = TextEditingController(text: '${DateTime.now().year}');
+  final capacity = TextEditingController(text: '100');
+  var template = 'spellingBee';
+  final result = await showDialog<(String, String, int, int)>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Create competition'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Competition name'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: template,
+              decoration: const InputDecoration(labelText: 'Template'),
+              items: const [
+                DropdownMenuItem(
+                  value: 'spellingBee',
+                  child: Text('Spelling bee'),
+                ),
+                DropdownMenuItem(
+                  value: 'interSchool',
+                  child: Text('Inter-school competition'),
+                ),
+                DropdownMenuItem(
+                  value: 'knockout',
+                  child: Text('Knockout tournament'),
+                ),
+                DropdownMenuItem(
+                  value: 'custom',
+                  child: Text('Custom competition'),
+                ),
+              ],
+              onChanged: (value) =>
+                  setDialogState(() => template = value ?? template),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: year,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Year'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: capacity,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Capacity'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (name.text.trim().isEmpty) return;
+              Navigator.pop(context, (
+                name.text.trim(),
+                template,
+                int.tryParse(year.text) ?? DateTime.now().year,
+                int.tryParse(capacity.text) ?? 0,
+              ));
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    ),
+  );
+  name.dispose();
+  year.dispose();
+  capacity.dispose();
+  return result;
+}
+
+String _managementLabel(String value) {
+  final spaced = value.replaceAllMapped(
+    RegExp(r'([a-z])([A-Z])'),
+    (match) => '${match.group(1)} ${match.group(2)}',
+  );
+  return spaced.isEmpty
+      ? spaced
+      : '${spaced[0].toUpperCase()}${spaced.substring(1)}';
+}
+
+String _trainingTime(int seconds) {
+  final hours = seconds ~/ 3600;
+  final minutes = (seconds % 3600) ~/ 60;
+  return hours > 0 ? '${hours}h ${minutes}m' : '${minutes}m';
+}
+
+String _lastActive(DateTime? value) {
+  if (value == null) return 'Never active';
+  final days = DateTime.now().difference(value).inDays;
+  return switch (days) {
+    <= 0 => 'Active today',
+    1 => 'Active yesterday',
+    _ => 'Active $days days ago',
+  };
+}
+
+String _teamReadiness(List<OrganizationLearner> members, int averageAccuracy) {
+  if (members.isEmpty) return 'Needs practice';
+  final averageScore =
+      members.fold<int>(
+        0,
+        (total, learner) => total + learner.readinessScore,
+      ) ~/
+      members.length;
+  final score = ((averageScore + averageAccuracy) / 2).round();
+  return switch (score) {
+    >= 85 => 'Excellent',
+    >= 70 => 'Good',
+    >= 50 => 'Fair',
+    _ => 'Needs practice',
+  };
+}

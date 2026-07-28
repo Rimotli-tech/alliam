@@ -38,12 +38,43 @@ class OrganizationLearner {
     required this.name,
     required this.grade,
     required this.status,
+    required this.journey,
   });
 
   final String id;
   final String name;
   final String grade;
   final String status;
+  final Map<String, dynamic> journey;
+
+  int get sessions => _integer(journey['sessions']);
+  int get wordsAttempted => _integer(journey['wordsPractised']);
+  int get accuracy => _integer(journey['accuracy']);
+  int get currentStreak => _integer(journey['currentStreak']);
+  int get competitionCount => _integer(journey['matches']);
+  int get trainingSeconds => _integer(journey['trainingSeconds']);
+  DateTime? get lastActive =>
+      DateTime.tryParse(journey['lastCompletedAt']?.toString() ?? '');
+
+  int get readinessScore {
+    final activity = sessions.clamp(0, 20) * 2;
+    final accuracyScore = (accuracy * 0.5).round();
+    final recency = lastActive == null
+        ? 0
+        : DateTime.now().difference(lastActive!).inDays <= 2
+        ? 10
+        : DateTime.now().difference(lastActive!).inDays <= 7
+        ? 6
+        : 0;
+    return (activity + accuracyScore + recency).clamp(0, 100);
+  }
+
+  String get readinessLabel => switch (readinessScore) {
+    >= 85 => 'Excellent',
+    >= 70 => 'Good',
+    >= 50 => 'Fair',
+    _ => 'Needs practice',
+  };
 
   factory OrganizationLearner.fromDocument(
     DocumentSnapshot<Map<String, dynamic>> document,
@@ -54,6 +85,7 @@ class OrganizationLearner {
       name: data['name']?.toString() ?? 'Learner',
       grade: data['grade']?.toString() ?? '',
       status: data['status']?.toString() ?? 'active',
+      journey: _map(data['journey']),
     );
   }
 }
@@ -88,12 +120,16 @@ class OrganizationCompetition {
     required this.id,
     required this.name,
     required this.status,
+    required this.template,
+    required this.year,
     required this.participantOrganizationIds,
   });
 
   final String id;
   final String name;
   final String status;
+  final String template;
+  final int year;
   final List<String> participantOrganizationIds;
 
   factory OrganizationCompetition.fromDocument(
@@ -104,6 +140,8 @@ class OrganizationCompetition {
       id: document.id,
       name: data['name']?.toString() ?? 'Competition',
       status: data['status']?.toString() ?? 'draft',
+      template: data['template']?.toString() ?? 'spellingBee',
+      year: (data['year'] as num?)?.round() ?? DateTime.now().year,
       participantOrganizationIds:
           (data['participantOrganizationIds'] as List? ?? const [])
               .map((value) => value.toString())
@@ -296,24 +334,51 @@ class OrganizationManagementRepository {
     await _activity(organizationId, 'Invitation sent to ${email.trim()}.');
   }
 
-  Future<void> createCompetition({
+  Future<String> createCompetition({
     required String organizationId,
     required String name,
     required String actorUid,
+    String template = 'spellingBee',
+    int? year,
+    int capacity = 0,
   }) async {
     final document = _collection(organizationId, 'competitions').doc();
     await document.set({
       'id': document.id,
       'name': name.trim(),
+      'description': '',
       'status': 'draft',
+      'template': template,
+      'year': year ?? DateTime.now().year,
       'hostOrganizationId': organizationId,
       'participantOrganizationIds': [organizationId],
+      'registration': {
+        'capacity': capacity,
+        'mode': 'organization',
+        'approvalRequired': true,
+        'waitlistEnabled': true,
+      },
+      'eligibility': {'notes': ''},
+      'budget': {'currency': 'NGN', 'limit': 0},
       'createdBy': actorUid,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
     await _activity(organizationId, 'Competition $name was created.');
+    return document.id;
   }
+
+  Future<String> duplicateCompetition({
+    required String organizationId,
+    required OrganizationCompetition source,
+    required String actorUid,
+  }) => createCompetition(
+    organizationId: organizationId,
+    name: '${source.name} ${DateTime.now().year + 1}',
+    actorUid: actorUid,
+    template: source.template,
+    year: DateTime.now().year + 1,
+  );
 
   Future<void> setCompetitionStatus({
     required String organizationId,
@@ -378,3 +443,9 @@ Map<String, bool> _permissions(Object? value) {
       entry.key.toString(): entry.value == true,
   };
 }
+
+Map<String, dynamic> _map(Object? value) =>
+    value is Map ? Map<String, dynamic>.from(value) : {};
+
+int _integer(Object? value) =>
+    value is num ? value.round() : int.tryParse('$value') ?? 0;

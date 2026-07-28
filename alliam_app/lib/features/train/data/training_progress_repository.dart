@@ -15,6 +15,9 @@ class TrainingProgressRepository {
     required int correct,
     required int attempted,
     required Set<String> incorrectWords,
+    int durationSeconds = 0,
+    int currentStreak = 0,
+    int? pointsEarned,
   }) async {
     final user = _auth.currentUser;
     if (user == null || user.isAnonymous || attempted == 0) return null;
@@ -36,7 +39,7 @@ class TrainingProgressRepository {
         ...incorrectWords,
       };
       final accuracy = (correct / attempted * 100).round();
-      final scoreEarned = correct * 100;
+      final scoreEarned = pointsEarned ?? correct * 100;
 
       for (var index = 0; index < profiles.length; index++) {
         if (profiles[index]['id']?.toString() != activeProfileId) continue;
@@ -66,6 +69,8 @@ class TrainingProgressRepository {
           ...journey,
           'sessions': sessions,
           'wordsPractised': _integer(journey['wordsPractised']) + attempted,
+          'trainingSeconds':
+              _integer(journey['trainingSeconds']) + durationSeconds,
           'accuracy':
               (((previousAccuracy * (sessions - 1)) + accuracy) / sessions)
                   .round(),
@@ -77,6 +82,10 @@ class TrainingProgressRepository {
           'stageSessions': stageSessions,
           'stageAccuracy': stageAccuracy,
           'totalScore': totalScore,
+          'currentStreak': currentStreak,
+          'bestStreak': currentStreak > _integer(journey['bestStreak'])
+              ? currentStreak
+              : _integer(journey['bestStreak']),
           'lastCompletedAt': DateTime.now().toUtc().toIso8601String(),
         };
         normalizedJourney = Map<String, dynamic>.from(
@@ -116,7 +125,7 @@ class TrainingProgressRepository {
       'attempted': attempted,
       'incorrectWords': incorrectWords.toList(),
       'accuracy': (correct / attempted * 100).round(),
-      'scoreEarned': correct * 100,
+      'scoreEarned': outcome?.scoreEarned ?? pointsEarned ?? correct * 100,
       'stage': outcome?.stage.id ?? 'foundation',
       'promoted': outcome?.promoted ?? false,
       'completedAt': FieldValue.serverTimestamp(),

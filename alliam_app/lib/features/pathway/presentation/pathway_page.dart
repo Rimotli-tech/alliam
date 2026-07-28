@@ -14,7 +14,10 @@ import '../../../core/widgets/account_menu_button.dart';
 import '../../auth/data/account_repository.dart';
 import '../../auth/domain/account_session.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../train/data/learner_pathway_progress_repository.dart';
+import '../../train/data/learner_word_progress_repository.dart';
 import '../../train/domain/learner_pathway.dart';
+import '../../train/domain/training_mode.dart';
 
 class PathwayPage extends StatefulWidget {
   const PathwayPage({super.key});
@@ -24,7 +27,15 @@ class PathwayPage extends StatefulWidget {
 }
 
 class _PathwayPageState extends State<PathwayPage> {
-  late final Future<({AccountSession session, AlliamSettings settings})> _data;
+  late final Future<
+    ({
+      AccountSession session,
+      AlliamSettings settings,
+      LearnerMasterySummary mastery,
+      LearnerPathwayPosition position,
+    })
+  >
+  _data;
 
   @override
   void initState() {
@@ -32,7 +43,15 @@ class _PathwayPageState extends State<PathwayPage> {
     _data = _load();
   }
 
-  Future<({AccountSession session, AlliamSettings settings})> _load() async {
+  Future<
+    ({
+      AccountSession session,
+      AlliamSettings settings,
+      LearnerMasterySummary mastery,
+      LearnerPathwayPosition position,
+    })
+  >
+  _load() async {
     final auth = FirebaseAuth.instance;
     final user = auth.currentUser;
     if (user == null) throw StateError('Sign in to continue.');
@@ -40,9 +59,29 @@ class _PathwayPageState extends State<PathwayPage> {
       AccountRepository(FirebaseFirestore.instance).load(user),
       SettingsRepository(FirebaseFirestore.instance, auth).load(),
     ]);
+    final session = values[0] as AccountSession;
+    final learnerId = session.activeLearnerId;
+    var mastery = LearnerMasterySummary.empty;
+    var position = LearnerPathway.position(introduced: 0, mastered: 0);
+    if (learnerId != null) {
+      mastery = await LearnerWordProgressRepository(
+        FirebaseFirestore.instance,
+      ).loadSummary(accountId: user.uid, learnerId: learnerId);
+      position =
+          await LearnerPathwayProgressRepository(
+            FirebaseFirestore.instance,
+          ).syncPosition(
+            accountId: user.uid,
+            learnerId: learnerId,
+            introduced: mastery.introduced,
+            mastered: mastery.mastered,
+          );
+    }
     return (
-      session: values[0] as AccountSession,
+      session: session,
       settings: values[1] as AlliamSettings,
+      mastery: mastery,
+      position: position,
     );
   }
 
@@ -62,7 +101,12 @@ class _PathwayPageState extends State<PathwayPage> {
               Positioned.fill(
                 child:
                     FutureBuilder<
-                      ({AccountSession session, AlliamSettings settings})
+                      ({
+                        AccountSession session,
+                        AlliamSettings settings,
+                        LearnerMasterySummary mastery,
+                        LearnerPathwayPosition position,
+                      })
                     >(
                       future: _data,
                       builder: (context, snapshot) {
@@ -110,19 +154,24 @@ class _PathwayPageState extends State<PathwayPage> {
 class _PathContent extends StatelessWidget {
   const _PathContent({required this.data, required this.onStart});
 
-  final ({AccountSession session, AlliamSettings settings}) data;
+  final ({
+    AccountSession session,
+    AlliamSettings settings,
+    LearnerMasterySummary mastery,
+    LearnerPathwayPosition position,
+  })
+  data;
   final ValueChanged<String> onStart;
 
   @override
   Widget build(BuildContext context) {
     final learner = data.session.activeLearner;
-    final journey = learner?.journey ?? const <String, dynamic>{};
-    final current = LearnerPathway.stage(journey['stage']?.toString());
-    final sessions = (journey['stageSessions'] as num?)?.round() ?? 0;
-    final accuracy = (journey['stageAccuracy'] as num?)?.round() ?? 0;
-    final currentIndex = LearnerPathway.stages.indexOf(current);
-    final recommendedSlug = sessions.isEven ? 'hear-and-spell' : 'word-flash';
-    final recommendedLabel = sessions.isEven ? 'Hear & Spell' : 'Word Flash';
+    final unit = LearnerPathway.unit(data.position.unitId);
+    final unitIndex = LearnerPathway.foundationUnits.indexOf(unit);
+    final currentIndex = unit.nodes.indexWhere(
+      (node) => node.id == data.position.nodeId,
+    );
+    final resolvedNodeIndex = currentIndex < 0 ? 0 : currentIndex;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -139,52 +188,24 @@ class _PathContent extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 760),
               child: Column(
                 children: [
-                  Text(
-                    'Welcome back, ${learner?.name ?? data.session.firstName}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: AlliamColors.text),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Your spelling path',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: AlliamColors.coral,
-                      fontWeight: FontWeight.w700,
-                      fontSize: compact ? 38 : 50,
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Hi ${learner?.name ?? data.session.firstName}',
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                        color: AlliamColors.coral,
+                        fontWeight: FontWeight.w700,
+                        fontSize: compact ? 38 : 50,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    '${learner?.grade ?? 'Grade 1'} · Keep moving forward, one word at a time.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AlliamColors.text),
                   ),
                   SizedBox(height: compact ? 34 : 46),
-                  for (
-                    var index = 0;
-                    index < LearnerPathway.stages.length;
-                    index++
-                  )
-                    _PathStop(
-                      stage: LearnerPathway.stages[index],
-                      index: index,
-                      state: index < currentIndex
-                          ? _StopState.complete
-                          : index == currentIndex
-                          ? _StopState.current
-                          : _StopState.locked,
-                      sessions: index == currentIndex ? sessions : 0,
-                      accuracy: index == currentIndex ? accuracy : 0,
-                      mode: index == currentIndex ? recommendedLabel : null,
-                      alignRight: index.isOdd,
-                      compact: compact,
-                      isLast: index == LearnerPathway.stages.length - 1,
-                      onTap: index == currentIndex
-                          ? () => onStart(recommendedSlug)
-                          : null,
-                    ),
+                  ..._unitTrail(
+                    currentUnitIndex: unitIndex,
+                    currentNodeIndex: resolvedNodeIndex,
+                    mastery: data.mastery,
+                    compact: compact,
+                  ),
                   const SizedBox(height: 14),
                   TextButton.icon(
                     onPressed: () => context.go('/train'),
@@ -199,30 +220,192 @@ class _PathContent extends StatelessWidget {
       },
     );
   }
+
+  List<Widget> _unitTrail({
+    required int currentUnitIndex,
+    required int currentNodeIndex,
+    required LearnerMasterySummary mastery,
+    required bool compact,
+  }) {
+    final widgets = <Widget>[];
+    var trailIndex = 0;
+    final units = LearnerPathway.foundationUnits;
+    final totalNodes = units.fold<int>(
+      0,
+      (total, unit) => total + unit.nodes.length,
+    );
+    for (var unitIndex = 0; unitIndex < units.length; unitIndex++) {
+      final unit = units[unitIndex];
+      final unitState = unitIndex < currentUnitIndex
+          ? _UnitState.complete
+          : unitIndex == currentUnitIndex
+          ? _UnitState.current
+          : _UnitState.locked;
+      widgets.add(
+        _UnitHeading(
+          unit: unit,
+          number: unitIndex + 1,
+          total: units.length,
+          state: unitState,
+          mastery: mastery,
+          showIncomingTrail: unitIndex > 0,
+        ),
+      );
+      for (var nodeIndex = 0; nodeIndex < unit.nodes.length; nodeIndex++) {
+        final state = unitIndex < currentUnitIndex
+            ? _StopState.complete
+            : unitIndex > currentUnitIndex
+            ? _StopState.locked
+            : nodeIndex < currentNodeIndex
+            ? _StopState.complete
+            : nodeIndex == currentNodeIndex
+            ? _StopState.current
+            : _StopState.locked;
+        final available = state != _StopState.locked;
+        widgets.add(
+          _PathStop(
+            node: unit.nodes[nodeIndex],
+            index: trailIndex,
+            state: state,
+            mastery: mastery,
+            alignRight: trailIndex.isOdd,
+            compact: compact,
+            isLast: trailIndex == totalNodes - 1,
+            onTap: available
+                ? () => onStart(unit.nodes[nodeIndex].mode.slug)
+                : null,
+          ),
+        );
+        trailIndex++;
+      }
+    }
+    return widgets;
+  }
 }
 
 enum _StopState { complete, current, locked }
 
+enum _UnitState { complete, current, locked }
+
+class _UnitHeading extends StatelessWidget {
+  const _UnitHeading({
+    required this.unit,
+    required this.number,
+    required this.total,
+    required this.state,
+    required this.mastery,
+    required this.showIncomingTrail,
+  });
+
+  final PathwayUnit unit;
+  final int number;
+  final int total;
+  final _UnitState state;
+  final LearnerMasterySummary mastery;
+  final bool showIncomingTrail;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = state == _UnitState.current;
+    final complete = state == _UnitState.complete;
+    return Padding(
+      padding: EdgeInsets.only(top: showIncomingTrail ? 34 : 0, bottom: 24),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (showIncomingTrail)
+            Positioned(
+              top: 0,
+              bottom: 0,
+              child: Container(
+                width: 3,
+                color: (complete || current)
+                    ? AlliamColors.coral.withValues(alpha: 0.28)
+                    : AlliamColors.line,
+              ),
+            ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+            decoration: BoxDecoration(
+              color: current
+                  ? AlliamColors.surfaceStrong
+                  : AlliamColors.surface,
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(
+                color: current ? AlliamColors.coral : AlliamColors.line,
+                width: current ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  complete
+                      ? Icons.check_circle_outline_rounded
+                      : current
+                      ? Icons.route_rounded
+                      : Icons.lock_outline_rounded,
+                  color: complete || current
+                      ? AlliamColors.coral
+                      : AlliamColors.muted,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Unit $number of $total · ${unit.label}',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: current
+                              ? AlliamColors.coral
+                              : AlliamColors.text,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(unit.description),
+                    ],
+                  ),
+                ),
+                if (complete)
+                  Text(
+                    '${unit.masteryTarget} mastered',
+                    style: const TextStyle(
+                      color: AlliamColors.success,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  )
+                else if (current)
+                  Text(
+                    '${mastery.mastered}/${unit.masteryTarget}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PathStop extends StatelessWidget {
   const _PathStop({
-    required this.stage,
+    required this.node,
     required this.index,
     required this.state,
-    required this.sessions,
-    required this.accuracy,
-    required this.mode,
+    required this.mastery,
     required this.alignRight,
     required this.compact,
     required this.isLast,
     required this.onTap,
   });
 
-  final PathwayStage stage;
+  final PathwayNode node;
   final int index;
   final _StopState state;
-  final int sessions;
-  final int accuracy;
-  final String? mode;
+  final LearnerMasterySummary mastery;
   final bool alignRight;
   final bool compact;
   final bool isLast;
@@ -232,9 +415,11 @@ class _PathStop extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = state == _StopState.current;
     final complete = state == _StopState.complete;
-    final progress = stage.sessionsRequired == 0
-        ? 1.0
-        : (sessions / stage.sessionsRequired).clamp(0.0, 1.0);
+    final progress = node.masteredRequired > 0
+        ? (mastery.mastered / node.masteredRequired).clamp(0.0, 1.0)
+        : node.introducedRequired > 0
+        ? (mastery.introduced / node.introducedRequired).clamp(0.0, 1.0)
+        : 1.0;
     final width = compact ? 238.0 : 310.0;
 
     return SizedBox(
@@ -254,8 +439,10 @@ class _PathStop extends StatelessWidget {
           Align(
             alignment: alignRight ? Alignment.topRight : Alignment.topLeft,
             child: Semantics(
-              button: current,
-              label: '${stage.label} stage',
+              button: current || complete,
+              label: complete
+                  ? '${node.label}, mastered, review again'
+                  : '${node.label} path node',
               child: InkWell(
                 onTap: onTap,
                 borderRadius: BorderRadius.circular(34),
@@ -295,7 +482,7 @@ class _PathStop extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        stage.label,
+                        node.label,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           color: current
                               ? AlliamColors.coral
@@ -306,10 +493,10 @@ class _PathStop extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         complete
-                            ? 'Stage complete'
+                            ? '${node.mode.label} · Review again'
                             : current
-                            ? '$mode · Continue'
-                            : 'Complete ${LearnerPathway.stages[index - 1].label} to unlock',
+                            ? '${node.mode.label} · Continue'
+                            : 'Complete the previous node to unlock',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AlliamColors.text,
@@ -327,7 +514,9 @@ class _PathStop extends StatelessWidget {
                         ),
                         const SizedBox(height: 7),
                         Text(
-                          '$sessions/${stage.sessionsRequired} sessions · $accuracy% accuracy',
+                          node.masteredRequired > 0
+                              ? '${mastery.mastered}/${node.masteredRequired} words mastered'
+                              : '${mastery.introduced}/${node.introducedRequired} words introduced',
                           style: TextStyle(
                             color: AlliamColors.text,
                             fontSize: 12,

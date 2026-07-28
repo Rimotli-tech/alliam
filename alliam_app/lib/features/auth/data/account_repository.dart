@@ -85,11 +85,17 @@ class AccountRepository {
       await _migrateLegacy(user, session);
     }
     if (session.role == AccountRole.organization) {
-      await OrganizationRepository(_firestore).ensureOwnerFoundation(
+      final organizationRepository = OrganizationRepository(_firestore);
+      await organizationRepository.ensureOwnerFoundation(
         user: user,
         organizationId: session.organizationId ?? user.uid,
         name: session.organizationName,
         country: session.ownerCountry,
+      );
+      await organizationRepository.syncAccountLearners(
+        organizationId: session.organizationId ?? user.uid,
+        accountId: user.uid,
+        learners: session.learners.map((learner) => learner.toMap()).toList(),
       );
     }
     return session;

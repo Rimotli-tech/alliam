@@ -80,22 +80,15 @@ class OrganizationDashboardPage extends StatelessWidget {
     (
       Icons.emoji_events_outlined,
       'Competitions',
-      'Create fixtures, rooms, and competition formats.',
+      'Create competitions, approve participants, and publish results.',
       'competitions',
       'manageCompetitions',
     ),
     (
       Icons.mail_outline_rounded,
       'Invitations',
-      'Invite learners, coaches, and participating organisations.',
+      'Invite learners and participating organisations.',
       'invitations',
-      'manageMembers',
-    ),
-    (
-      Icons.settings_outlined,
-      'Staff & permissions',
-      'Invite staff and manage role-based access.',
-      'staff',
       'manageMembers',
     ),
   ];

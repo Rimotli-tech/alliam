@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/admin/admin_access.dart';
+import '../../../core/auth/session_sign_out.dart';
 import '../data/account_repository.dart';
 import '../domain/account_session.dart';
 import 'onboarding_page.dart';
@@ -52,10 +53,42 @@ class _AuthGateState extends State<AuthGate> {
             if (accountSnapshot.hasError) {
               return Scaffold(
                 body: Center(
-                  child: FilledButton.icon(
-                    onPressed: () => setState(() => _revision++),
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Retry account setup'),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.sync_problem_rounded, size: 42),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Account setup was interrupted',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Resume setup to safely complete the missing account records.',
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            onPressed: () => setState(() => _revision++),
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Resume account setup'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: () async {
+                              await signOutAlliamSession();
+                              if (context.mounted) context.go('/');
+                            },
+                            child: const Text('Sign out'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               );

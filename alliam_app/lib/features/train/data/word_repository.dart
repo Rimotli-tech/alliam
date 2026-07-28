@@ -52,4 +52,17 @@ class WordRepository {
     final document = query.docs.first;
     return SpellingWord.fromFirestore(document.id, document.data());
   }
+
+  Future<List<SpellingWord>> loadWords(Iterable<String> words) async {
+    final unique = words.map((word) => word.toLowerCase()).toSet().toList();
+    final loaded = await Future.wait(unique.map(loadWord));
+    return loaded
+        .where(
+          (word) =>
+              word.approved &&
+              approvedCollections.contains(word.approvalCollection) &&
+              word.pronunciation?.storagePath.isNotEmpty == true,
+        )
+        .toList();
+  }
 }

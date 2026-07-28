@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -18,8 +20,11 @@ import '../data/training_audio_service.dart';
 import '../data/training_progress_repository.dart';
 import '../data/session_audio_manifest.dart';
 import '../data/word_repository.dart';
+import '../data/learner_word_progress_repository.dart';
+import '../data/learner_pathway_progress_repository.dart';
 import '../domain/spelling_word.dart';
 import '../domain/training_mode.dart';
+import '../domain/training_score.dart';
 import '../domain/learner_pathway.dart';
 import 'widgets/letter_diamonds.dart';
 
@@ -35,9 +40,14 @@ enum _SessionPhase {
 }
 
 class TrainingSessionPage extends StatefulWidget {
-  const TrainingSessionPage({required this.mode, super.key});
+  const TrainingSessionPage({
+    required this.mode,
+    this.reviewWords = const [],
+    super.key,
+  });
 
   final TrainingMode mode;
+  final List<String> reviewWords;
 
   @override
   State<TrainingSessionPage> createState() => _TrainingSessionPageState();
@@ -47,6 +57,7 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   late final WordRepository _words;
   late final TrainingAudioService _audio;
   late final TrainingProgressRepository _progress;
+  late final LearnerWordProgressRepository _wordProgress;
   final _answer = TextEditingController();
   final _focus = FocusNode();
   List<SpellingWord> _sessionWords = [];
@@ -64,6 +75,10 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   bool _showHeldWord = false;
   bool _flashUsed = false;
   bool _lastCorrect = false;
+  bool _wrongFeedbackReady = true;
+  int _repeatUses = 0;
+  int _lastWordPoints = 0;
+  DateTime _attemptStartedAt = DateTime.now();
   String _learnerName = 'Speller';
   String _level = 'Foundation';
   int _wordCount = 5;
@@ -79,9 +94,34 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   bool _progressRecorded = false;
   TrainingMode? _introModeShown;
   AccountSession? _accountSession;
+  DateTime _sessionStartedAt = DateTime.now();
+  String? _accountId;
+  String? _activeLearnerId;
+  String _wordLedgerSessionId = '';
+  bool _guidedIntroduction = true;
+  bool _suspendTypingFocus = false;
+  bool _showRotatePrompt = false;
+  bool _sessionLoadStarted = false;
+  bool _lockedLandscape = false;
+  final Set<String> _masteredThisSession = {};
+  final Set<String> _needsPracticeThisSession = {};
+  LearnerMasterySummary? _masterySummary;
 
   SpellingWord? get _current =>
       _sessionWords.isEmpty ? null : _sessionWords[_index];
+
+  bool get _isCompactPhoneLandscape {
+    if (!mounted) return false;
+    final size = MediaQuery.sizeOf(context);
+    return _isPhonePlatform &&
+        size.width > size.height &&
+        size.shortestSide < 600;
+  }
+
+  bool get _usesTypedAnswer => !{
+    TrainingMode.similarWords,
+    TrainingMode.buildTheWord,
+  }.contains(widget.mode);
 
   @override
   void initState() {
@@ -95,11 +135,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
+    _wordProgress = LearnerWordProgressRepository(FirebaseFirestore.instance);
     _settings = SettingsRepository(
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
-    _loadSession();
+    FocusManager.instance.addListener(_maintainTypingFocus);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_preparePhoneOrientation());
+    });
   }
 
   @override
@@ -108,9 +152,58 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     _timer?.cancel();
     unawaited(BackgroundMusicService.instance.leaveExercise());
     _answer.dispose();
+    FocusManager.instance.removeListener(_maintainTypingFocus);
     _focus.dispose();
     unawaited(_audio.stop());
+    if (_lockedLandscape) {
+      unawaited(
+        SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]),
+      );
+    }
     super.dispose();
+  }
+
+  bool get _isPhonePlatform =>
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  Future<void> _preparePhoneOrientation() async {
+    if (!mounted) return;
+    final size = MediaQuery.sizeOf(context);
+    final phone = _isPhonePlatform && size.shortestSide < 600;
+    if (!phone) {
+      _beginSessionLoad();
+      return;
+    }
+    if (size.width > size.height) {
+      if (!kIsWeb) {
+        _lockedLandscape = true;
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+      if (mounted) _beginSessionLoad();
+      return;
+    }
+    setState(() => _showRotatePrompt = true);
+    if (kIsWeb) return;
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (!mounted) return;
+    _lockedLandscape = true;
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (mounted) _beginSessionLoad();
+  }
+
+  void _beginSessionLoad() {
+    if (_sessionLoadStarted || !mounted) return;
+    _sessionLoadStarted = true;
+    setState(() => _showRotatePrompt = false);
+    unawaited(_loadSession());
   }
 
   Future<void> _loadSession() async {
@@ -129,6 +222,12 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _lives = 3;
       _streak = 0;
       _incorrectWords.clear();
+      _masteredThisSession.clear();
+      _needsPracticeThisSession.clear();
+      _masterySummary = null;
+      _sessionStartedAt = DateTime.now();
+      _wordLedgerSessionId =
+          '${DateTime.now().microsecondsSinceEpoch}-${widget.mode.slug}';
     });
     try {
       final preferences = await _settings.load();
@@ -139,7 +238,14 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
           FirebaseFirestore.instance,
         ).load(user);
         _accountSession = session;
+        _accountId = user.uid;
+        _activeLearnerId = session.activeLearnerId;
         _learnerName = session.activeLearnerName.trim().split(' ').first;
+        final gradeMatch = RegExp(
+          r'\d+',
+        ).firstMatch(session.activeLearner?.grade ?? '');
+        final grade = int.tryParse(gradeMatch?.group(0) ?? '');
+        _guidedIntroduction = grade == null || grade <= 3;
         if (preferences.automaticPathway) {
           pathwayLevel = LearnerPathway.stage(
             session.activeLearner?.journey['stage']?.toString(),
@@ -151,7 +257,13 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       _wordCount = (module['wordCount'] as num?)?.round() ?? _wordCount;
       _missingVariant = module['missingVariant']?.toString() ?? _missingVariant;
       _patternFocus = module['patternFocus']?.toString() ?? _patternFocus;
-      final words = await _words.load(level: _level, count: _wordCount);
+      final words =
+          {
+            TrainingMode.wordFlash,
+            TrainingMode.missedWords,
+          }.contains(widget.mode)
+          ? await _loadWordFlashQueue()
+          : await _words.load(level: _level, count: _wordCount);
       if (!_valid(run)) return;
       await _audio.prepareSession(words);
       if (!_valid(run)) return;
@@ -173,8 +285,11 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     _answer.clear();
     _typedLength = 0;
     _lastCorrect = false;
+    _wrongFeedbackReady = true;
     _showHeldWord = false;
     _flashUsed = false;
+    _repeatUses = 0;
+    _lastWordPoints = 0;
     _usedTileIndices.clear();
     _usedTileOrder.clear();
     setState(() {
@@ -246,6 +361,10 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     await _wait(const Duration(milliseconds: 500), run);
     if (!_valid(run)) return;
     await _playPronunciation();
+    if (!_guidedIntroduction) {
+      if (_valid(run)) _beginAttempt();
+      return;
+    }
     await _wait(const Duration(seconds: 3), run);
     if (!_valid(run)) return;
     await _playPronunciation();
@@ -271,20 +390,51 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   }
 
   void _beginAttempt() {
+    _attemptStartedAt = DateTime.now();
     setState(() {
       _phase = _SessionPhase.attempt;
       _activeSpellingLetter = -1;
     });
-    if ({
-      TrainingMode.similarWords,
-      TrainingMode.buildTheWord,
-    }.contains(widget.mode)) {
+    if (!_usesTypedAnswer) {
+      return;
+    }
+    if (_isCompactPhoneLandscape) {
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _focus.requestFocus();
       SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
+  }
+
+  void _maintainTypingFocus() {
+    if (!mounted ||
+        _isCompactPhoneLandscape ||
+        _suspendTypingFocus ||
+        _phase != _SessionPhase.attempt ||
+        _focus.hasFocus) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _suspendTypingFocus || _phase != _SessionPhase.attempt) {
+        return;
+      }
+      _focus.requestFocus();
+    });
+  }
+
+  void _restoreTypingFocus() {
+    if (!mounted ||
+        _isCompactPhoneLandscape ||
+        _phase != _SessionPhase.attempt) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _phase == _SessionPhase.attempt) {
+        _focus.requestFocus();
+      }
     });
   }
 
@@ -317,7 +467,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   Future<void> _submit({bool timedOut = false}) async {
     if (_phase != _SessionPhase.attempt) return;
     _timer?.cancel();
+    final submittedIndex = _index;
+    final submittedLastWord = submittedIndex == _sessionWords.length - 1;
     final correct = !timedOut && _answer.text.toLowerCase() == _expectedAnswer;
+    final points = TrainingScore.wordPoints(
+      correct: correct,
+      responseTime: DateTime.now().difference(_attemptStartedAt),
+      usedFlash: _flashUsed,
+      repeatUses: _repeatUses,
+    );
     if (correct) {
       _incorrectWords.remove(_current!.word);
       unawaited(SoundEffectsService.instance.correct());
@@ -327,18 +485,95 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     }
     setState(() {
       _lastCorrect = correct;
+      _wrongFeedbackReady = correct;
+      _lastWordPoints = points;
       _correct += correct ? 1 : 0;
-      _score += correct ? 100 : 0;
+      _score += points;
       _streak = correct ? _streak + 1 : 0;
       if (!correct && widget.mode == TrainingMode.survivalRun) _lives--;
       _phase = _SessionPhase.feedback;
     });
-    if (_index == _sessionWords.length - 1) {
+    if (!correct) {
+      unawaited(_releaseWrongFeedback(submittedIndex));
+    }
+    await _recordWordAttempt(correct);
+    if (submittedLastWord) {
       final run = _runId;
-      await _wait(const Duration(milliseconds: 850), run);
+      await _wait(Duration(milliseconds: correct ? 850 : 3650), run);
       if (!_valid(run)) return;
       setState(() => _phase = _SessionPhase.complete);
       unawaited(_recordProgress());
+    }
+  }
+
+  void _typeLetter(String letter) {
+    if (_phase != _SessionPhase.attempt ||
+        !_usesTypedAnswer ||
+        _answer.text.length >= _expectedAnswer.length) {
+      return;
+    }
+    _answer.text += letter.toLowerCase();
+    _answer.selection = TextSelection.collapsed(offset: _answer.text.length);
+    _typedLength = _answer.text.length;
+    unawaited(SoundEffectsService.instance.key());
+    setState(() {});
+  }
+
+  void _removeLetter() {
+    if (_phase != _SessionPhase.attempt || _answer.text.isEmpty) return;
+    final text = _answer.text;
+    _answer.text = text.substring(0, text.length - 1);
+    _answer.selection = TextSelection.collapsed(offset: _answer.text.length);
+    _typedLength = _answer.text.length;
+    setState(() {});
+  }
+
+  Future<List<SpellingWord>> _loadWordFlashQueue() async {
+    final accountId = _accountId;
+    final learnerId = _activeLearnerId;
+    if (accountId == null || learnerId == null) {
+      throw StateError('Choose a learner before starting this review.');
+    }
+    final queuedWords = widget.reviewWords.isNotEmpty
+        ? widget.reviewWords
+        : await _wordProgress.loadReviewQueue(
+            accountId: accountId,
+            learnerId: learnerId,
+            count: _wordCount,
+          );
+    if (queuedWords.isEmpty) {
+      throw StateError(
+        'Complete Hear & Spell first to build this learner’s review queue.',
+      );
+    }
+    return _words.loadWords(queuedWords);
+  }
+
+  Future<void> _recordWordAttempt(bool correct) async {
+    final accountId = _accountId;
+    final learnerId = _activeLearnerId;
+    final word = _current;
+    if (accountId == null || learnerId == null || word == null) return;
+    try {
+      final change = await _wordProgress.recordAttempt(
+        accountId: accountId,
+        learnerId: learnerId,
+        word: word,
+        mode: widget.mode,
+        correct: correct,
+        sessionId: _wordLedgerSessionId,
+      );
+      if (change == null || !mounted) return;
+      setState(() {
+        if (change.becameMastered) {
+          _masteredThisSession.add(word.word);
+          _needsPracticeThisSession.remove(word.word);
+        } else if (!correct || change.currentState == 'learning') {
+          _needsPracticeThisSession.add(word.word);
+        }
+      });
+    } catch (_) {
+      // The spelling session should remain playable if progress sync fails.
     }
   }
 
@@ -358,6 +593,17 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     await _prepareCurrent(firstWord: false);
   }
 
+  Future<void> _releaseWrongFeedback(int submittedIndex) async {
+    final run = _runId;
+    await _wait(const Duration(milliseconds: 3500), run);
+    if (!_valid(run) ||
+        _phase != _SessionPhase.feedback ||
+        _index != submittedIndex) {
+      return;
+    }
+    setState(() => _wrongFeedbackReady = true);
+  }
+
   Future<void> _recordProgress() async {
     if (_progressRecorded) return;
     _progressRecorded = true;
@@ -367,8 +613,36 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         correct: _correct,
         attempted: _index + 1,
         incorrectWords: _incorrectWords,
+        durationSeconds: DateTime.now()
+            .difference(_sessionStartedAt)
+            .inSeconds
+            .clamp(1, 3600),
+        currentStreak: _streak,
+        pointsEarned: _score,
       );
-      if (mounted) setState(() => _outcome = outcome);
+      LearnerMasterySummary? mastery;
+      final accountId = _accountId;
+      final learnerId = _activeLearnerId;
+      if (accountId != null && learnerId != null) {
+        mastery = await _wordProgress.loadSummary(
+          accountId: accountId,
+          learnerId: learnerId,
+        );
+        await LearnerPathwayProgressRepository(
+          FirebaseFirestore.instance,
+        ).syncPosition(
+          accountId: accountId,
+          learnerId: learnerId,
+          introduced: mastery.introduced,
+          mastered: mastery.mastered,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _outcome = outcome;
+          _masterySummary = mastery;
+        });
+      }
     } catch (_) {
       // Completion remains available offline; the session can be retried.
     }
@@ -647,6 +921,17 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showRotatePrompt) {
+      final landscape =
+          MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
+      if (kIsWeb && landscape) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _beginSessionLoad(),
+        );
+      }
+      return const Scaffold(body: _RotatePhonePrompt());
+    }
+    final compactLandscape = _isCompactPhoneLandscape;
     return Scaffold(
       body: AlliamBackground(
         child: SafeArea(
@@ -663,16 +948,24 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                   ),
                 ],
               ),
-              if (_phase == _SessionPhase.attempt ||
-                  _phase == _SessionPhase.feedback)
+              if (!compactLandscape &&
+                  (_phase == _SessionPhase.attempt ||
+                      _phase == _SessionPhase.feedback))
                 Positioned(
                   left: 18,
-                  bottom: 18,
+                  top: compactLandscape ? 76 : null,
+                  bottom: compactLandscape ? null : 18,
                   child: _SessionScore(
                     key: ValueKey('score-$_score'),
                     learnerName: _learnerName,
                     score: _score,
                     celebrate: _phase == _SessionPhase.feedback && _lastCorrect,
+                  ),
+                ),
+              if (_phase == _SessionPhase.feedback && !_lastCorrect)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: _WrongEdgeFlash(key: ValueKey('wrong-$_index')),
                   ),
                 ),
             ],
@@ -701,6 +994,14 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
             total: _sessionWords.length,
           ),
           const Spacer(),
+          if (_isCompactPhoneLandscape && _current != null) ...[
+            _SessionIconButton(
+              tooltip: 'Word helpers',
+              onPressed: _openCompactHelpers,
+              icon: const Icon(Icons.more_horiz_rounded),
+            ),
+            const SizedBox(width: 8),
+          ],
           _SessionIconButton(
             tooltip: 'Session settings',
             onPressed: _openSettings,
@@ -709,6 +1010,83 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _openCompactHelpers() async {
+    final word = _current;
+    if (word == null) return;
+    final size = MediaQuery.sizeOf(context);
+    final action = await showMenu<String>(
+      context: context,
+      color: AlliamColors.surfaceStrong,
+      position: RelativeRect.fromLTRB(size.width - 300, 76, 18, 0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      items: [
+        const PopupMenuItem(
+          value: 'repeat',
+          child: ListTile(
+            leading: Icon(Icons.refresh_rounded),
+            title: Text('Repeat'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'flash',
+          enabled: widget.mode == TrainingMode.hearAndSpell && !_flashUsed,
+          child: const ListTile(
+            leading: Icon(Icons.visibility_outlined),
+            title: Text('Flash word'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'Definition',
+          enabled: word.definition.isNotEmpty,
+          child: const ListTile(
+            leading: Icon(Icons.menu_book_outlined),
+            title: Text('Definition'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'Sentence',
+          enabled: word.sentence.isNotEmpty,
+          child: const ListTile(
+            leading: Icon(Icons.format_quote_rounded),
+            title: Text('Used in a sentence'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'Origin',
+          enabled: word.origin.isNotEmpty,
+          child: const ListTile(
+            leading: Icon(Icons.public_rounded),
+            title: Text('Origin'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'Part of speech',
+          enabled: word.partOfSpeech.isNotEmpty,
+          child: const ListTile(
+            leading: Icon(Icons.category_outlined),
+            title: Text('Part of speech'),
+          ),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    if (action == 'repeat') {
+      _repeatUses++;
+      await _playPronunciation();
+      return;
+    }
+    if (action == 'flash') {
+      setState(() {
+        _flashUsed = true;
+        _showHeldWord = true;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      if (mounted) setState(() => _showHeldWord = false);
+      return;
+    }
+    await _showWordInfo(action);
   }
 
   Widget _content(BuildContext context) {
@@ -874,6 +1252,9 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
   }
 
   Widget _exercise(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final compactLandscape =
+        size.width > size.height && size.shortestSide < 600;
     final teaching = _phase == _SessionPhase.teaching;
     final feedback = _phase == _SessionPhase.feedback;
     final reveal =
@@ -900,11 +1281,15 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         const SingleActivator(LogicalKeyboardKey.enter): () {
           if (_phase == _SessionPhase.attempt && _answer.text.isNotEmpty) {
             unawaited(_submit());
+          } else if (_phase == _SessionPhase.feedback && _wrongFeedbackReady) {
+            unawaited(_next());
           }
         },
         const SingleActivator(LogicalKeyboardKey.numpadEnter): () {
           if (_phase == _SessionPhase.attempt && _answer.text.isNotEmpty) {
             unawaited(_submit());
+          } else if (_phase == _SessionPhase.feedback && _wrongFeedbackReady) {
+            unawaited(_next());
           }
         },
       },
@@ -912,7 +1297,8 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         key: ValueKey('exercise-$_index'),
         behavior: HitTestBehavior.translucent,
         onTap: () {
-          if (_phase != _SessionPhase.attempt ||
+          if (compactLandscape ||
+              _phase != _SessionPhase.attempt ||
               _answer.text.length >= _current!.word.length) {
             return;
           }
@@ -920,13 +1306,19 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
           SystemChannels.textInput.invokeMethod<void>('TextInput.show');
         },
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 18, 24, 40),
+          padding: EdgeInsets.fromLTRB(
+            24,
+            compactLandscape ? 2 : 18,
+            24,
+            compactLandscape ? 12 : 40,
+          ),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 980),
               child: Column(
                 children: [
                   if (_phase == _SessionPhase.attempt &&
+                      !compactLandscape &&
                       widget.mode != TrainingMode.similarWords &&
                       widget.mode != TrainingMode.buildTheWord)
                     SizedBox(
@@ -972,46 +1364,59 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                         ),
                       ),
                     ),
-                  SizedBox(
-                    height: 76,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      alignment: Alignment.center,
-                      children: [
-                        if (feedback && _lastCorrect)
-                          Positioned(
-                            top: -62,
-                            child: _SuccessCheck(
-                              key: ValueKey('success-check-$_index'),
+                  if (!compactLandscape)
+                    SizedBox(
+                      height: 76,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.center,
+                        children: [
+                          if (feedback && _lastCorrect)
+                            Positioned(
+                              top: -62,
+                              child: _SuccessCheck(
+                                key: ValueKey('success-check-$_index'),
+                              ),
                             ),
-                          ),
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              title,
-                              style: Theme.of(context).textTheme.headlineMedium
-                                  ?.copyWith(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                title,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineMedium
+                                    ?.copyWith(
+                                      color: AlliamColors.coral,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                feedback
+                                    ? _lastCorrect
+                                          ? 'That spelling is correct.'
+                                          : 'The correct spelling is shown below.'
+                                    : teaching
+                                    ? 'Stay focused.'
+                                    : 'Type the spelling, then submit.',
+                                textAlign: TextAlign.center,
+                              ),
+                              if (feedback && _lastCorrect) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  '+$_lastWordPoints points',
+                                  style: const TextStyle(
                                     color: AlliamColors.coral,
                                     fontWeight: FontWeight.w700,
                                   ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              feedback
-                                  ? _lastCorrect
-                                        ? 'That spelling is correct.'
-                                        : 'The correct spelling is shown below.'
-                                  : teaching
-                                  ? 'Stay focused.'
-                                  : 'Type the spelling, then submit.',
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   if (widget.mode == TrainingMode.timedDrill &&
                       _phase == _SessionPhase.attempt) ...[
                     const SizedBox(height: 18),
@@ -1033,29 +1438,67 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                       streak: _streak,
                     ),
                   ],
-                  const SizedBox(height: 22),
+                  SizedBox(height: compactLandscape ? 2 : 22),
                   _modePrompt(context, teaching: teaching),
-                  const SizedBox(height: 22),
+                  SizedBox(height: compactLandscape ? 2 : 22),
                   SizedBox(
-                    height: 250,
+                    height: compactLandscape ? 112 : 250,
                     child: Center(
                       child: LetterDiamonds(
                         word: _expectedAnswer,
                         entered: _answer.text,
                         revealWord: reveal,
                         success: feedback && _lastCorrect,
+                        incorrect: feedback && !_lastCorrect,
+                        compact: compactLandscape,
                         activeIndex: teaching ? _activeSpellingLetter : -1,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 22),
+                  SizedBox(height: compactLandscape ? 8 : 22),
                   SizedBox(
-                    height: 150,
+                    height: compactLandscape
+                        ? _usesTypedAnswer
+                              ? 0
+                              : 64
+                        : widget.mode == TrainingMode.hearAndSpell
+                        ? 220
+                        : widget.mode == TrainingMode.wordFlash
+                        ? 170
+                        : 150,
                     child: Align(
                       alignment: Alignment.topCenter,
-                      child: _exerciseControls(feedback),
+                      child: compactLandscape && _usesTypedAnswer
+                          ? const SizedBox.shrink()
+                          : _exerciseControls(
+                              feedback,
+                              compactLandscape: compactLandscape,
+                            ),
                     ),
                   ),
+                  if (compactLandscape && _usesTypedAnswer) ...[
+                    const SizedBox(height: 4),
+                    _AlliamKeyboard(
+                      enabled: _phase == _SessionPhase.attempt,
+                      canSubmit: _phase == _SessionPhase.attempt
+                          ? _answer.text.isNotEmpty
+                          : _phase == _SessionPhase.feedback &&
+                                _wrongFeedbackReady &&
+                                _index < _sessionWords.length - 1,
+                      actionLabel: _phase == _SessionPhase.feedback
+                          ? 'Next word'
+                          : 'Submit',
+                      onLetter: _typeLetter,
+                      onBackspace: _removeLetter,
+                      onSubmit: () {
+                        if (_phase == _SessionPhase.feedback) {
+                          unawaited(_next());
+                        } else {
+                          unawaited(_submit());
+                        }
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1177,67 +1620,69 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     }
   }
 
-  Widget _exerciseControls(bool feedback) {
+  Widget _exerciseControls(bool feedback, {required bool compactLandscape}) {
     if (_phase == _SessionPhase.attempt) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              SizedBox(
-                width: 58,
-                height: 58,
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    shape: const CircleBorder(),
-                  ),
-                  onPressed: _answer.text.isEmpty
-                      ? null
-                      : () {
-                          if (widget.mode == TrainingMode.buildTheWord &&
-                              _usedTileOrder.isNotEmpty) {
-                            _usedTileIndices.remove(
-                              _usedTileOrder.removeLast(),
-                            );
-                          }
-                          final text = _answer.text;
-                          _answer.text = text.substring(0, text.length - 1);
-                          _answer.selection = TextSelection.collapsed(
-                            offset: _answer.text.length,
-                          );
-                          _typedLength = _answer.text.length;
-                          setState(() {});
-                          _focus.requestFocus();
-                        },
-                  child: const Icon(Icons.undo_rounded),
-                ),
-              ),
-              SizedBox(
-                width: 150,
-                height: 60,
-                child: FilledButton(
-                  onPressed: _answer.text.isEmpty ? null : _submit,
-                  child: const Text(
-                    'Submit',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          if (!compactLandscape || !_usesTypedAnswer)
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                SizedBox(
+                  width: 58,
+                  height: 58,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      shape: const CircleBorder(),
+                    ),
+                    onPressed: _answer.text.isEmpty
+                        ? null
+                        : () {
+                            if (widget.mode == TrainingMode.buildTheWord &&
+                                _usedTileOrder.isNotEmpty) {
+                              _usedTileIndices.remove(
+                                _usedTileOrder.removeLast(),
+                              );
+                            }
+                            _removeLetter();
+                            _restoreTypingFocus();
+                          },
+                    child: const Icon(Icons.undo_rounded),
                   ),
                 ),
-              ),
-            ],
-          ),
+                SizedBox(
+                  width: 150,
+                  height: 60,
+                  child: FilledButton(
+                    onPressed: _answer.text.isEmpty ? null : _submit,
+                    child: const Text(
+                      'Submit',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           if (widget.mode == TrainingMode.hearAndSpell ||
               widget.mode == TrainingMode.listenAndSpell ||
               widget.mode == TrainingMode.mockBee) ...[
-            const SizedBox(height: 26),
+            SizedBox(height: compactLandscape ? 10 : 26),
             Wrap(
               spacing: 16,
               children: [
                 OutlinedButton.icon(
-                  onPressed: _playPronunciation,
+                  onPressed: () async {
+                    _repeatUses++;
+                    await _playPronunciation();
+                    _restoreTypingFocus();
+                  },
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Repeat'),
                 ),
@@ -1250,14 +1695,18 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                         _flashUsed = true;
                         _showHeldWord = true;
                       });
+                      _restoreTypingFocus();
                     },
                     onPointerUp: (_) {
                       if (_showHeldWord) {
                         setState(() => _showHeldWord = false);
                       }
+                      _restoreTypingFocus();
                     },
-                    onPointerCancel: (_) =>
-                        setState(() => _showHeldWord = false),
+                    onPointerCancel: (_) {
+                      setState(() => _showHeldWord = false);
+                      _restoreTypingFocus();
+                    },
                     child: IgnorePointer(
                       child: OutlinedButton(
                         onPressed: _flashUsed ? null : () {},
@@ -1267,6 +1716,9 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
                       ),
                     ),
                   ),
+                if (compactLandscape &&
+                    widget.mode == TrainingMode.hearAndSpell)
+                  ..._wordInfoButtons(),
                 if (widget.mode == TrainingMode.listenAndSpell)
                   OutlinedButton.icon(
                     onPressed: () => _showWordInfo('Definition'),
@@ -1294,11 +1746,19 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
               ],
             ),
           ],
+          if (widget.mode == TrainingMode.hearAndSpell && !compactLandscape ||
+              widget.mode == TrainingMode.wordFlash) ...[
+            SizedBox(height: compactLandscape ? 10 : 18),
+            _wordInfoActions(),
+          ],
         ],
       );
     }
 
     if (feedback) {
+      if (!_wrongFeedbackReady) {
+        return const SizedBox(width: 164, height: 60);
+      }
       if (_index == _sessionWords.length - 1) {
         return const SizedBox(width: 164, height: 60);
       }
@@ -1324,27 +1784,89 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
     );
   }
 
+  Widget _wordInfoActions() {
+    return Semantics(
+      label: 'Word information',
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: 18,
+        runSpacing: 12,
+        children: _wordInfoButtons(),
+      ),
+    );
+  }
+
+  List<Widget> _wordInfoButtons() {
+    final word = _current!;
+    return [
+      _WordInfoButton(
+        label: 'Definition',
+        icon: Icons.menu_book_outlined,
+        available: word.definition.isNotEmpty,
+        onPressed: () => _showWordInfo('Definition'),
+      ),
+      _WordInfoButton(
+        label: 'Used in a sentence',
+        icon: Icons.format_quote_rounded,
+        available: word.sentence.isNotEmpty,
+        onPressed: () => _showWordInfo('Sentence'),
+      ),
+      _WordInfoButton(
+        label: 'Origin',
+        icon: Icons.public_rounded,
+        available: word.origin.isNotEmpty,
+        onPressed: () => _showWordInfo('Origin'),
+      ),
+      _WordInfoButton(
+        label: 'Part of speech',
+        icon: Icons.category_outlined,
+        available: word.partOfSpeech.isNotEmpty,
+        onPressed: () => _showWordInfo('Part of speech'),
+      ),
+    ];
+  }
+
   Widget _result(BuildContext context) {
     final attempted = (_index + 1).clamp(0, _sessionWords.length);
     final accuracy = attempted == 0 ? 0 : (_correct / attempted * 100).round();
     final outcome = _outcome;
     final promoted = outcome?.promoted == true;
+    final mastery = _masterySummary;
+    final mastered = mastery?.mastered ?? 0;
+    final position = LearnerPathway.position(
+      introduced: mastery?.introduced ?? 0,
+      mastered: mastered,
+    );
+    final unit = LearnerPathway.unit(position.unitId);
     return _MilestonePayoff(
       key: const ValueKey('complete'),
       title: promoted ? '${outcome!.stage.label} unlocked' : 'Session complete',
       accuracy: accuracy,
       correct: _correct,
       attempted: attempted,
-      scoreEarned: outcome?.scoreEarned ?? _score,
+      masteredThisSession: _masteredThisSession.length,
+      needsPracticeThisSession: _needsPracticeThisSession.length,
       stageLabel: outcome?.stage.label ?? _level,
-      stageProgress: outcome?.progress ?? 0,
-      stageSessions: outcome?.stageSessions ?? 0,
-      stageRequired: outcome?.stage.sessionsRequired ?? 5,
+      stageProgress: unit.masteryTarget == 0
+          ? 1
+          : (mastered / unit.masteryTarget).clamp(0, 1),
+      masteredWords: mastered,
+      masteryTarget: unit.masteryTarget,
       promoted: promoted,
       bestStreak: widget.mode == TrainingMode.streakChallenge ? _streak : null,
-      onAgain: _loadSession,
+      onAgain: _openNextSession,
       onLeave: () => context.go('/pathway'),
     );
+  }
+
+  void _openNextSession() {
+    final nextMode = widget.mode.nextLearningSession;
+    if (widget.mode == TrainingMode.hearAndSpell) {
+      final words = _sessionWords.map((word) => word.word).join(',');
+      context.go('/train/session/${nextMode.slug}?words=$words');
+      return;
+    }
+    context.go('/train/session/${nextMode.slug}');
   }
 
   Future<void> _wait(Duration duration, int run) async {
@@ -1362,39 +1884,56 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
       'Origin' => word.origin,
       _ => word.partOfSpeech,
     };
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AlliamColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(28, 26, 28, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                type,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: AlliamColors.coral,
-                  fontWeight: FontWeight.w700,
-                ),
+    _suspendTypingFocus = true;
+    final content = Builder(
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(28, 26, 28, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              type == 'Sentence' ? 'Used in a sentence' : type,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: AlliamColors.coral,
+                fontWeight: FontWeight.w700,
               ),
-              const SizedBox(height: 12),
-              Text(
-                value.isEmpty
-                    ? 'This information is not available yet.'
-                    : value,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 12),
+            Text(value, style: Theme.of(context).textTheme.titleMedium),
+          ],
         ),
       ),
     );
-    if (mounted) _focus.requestFocus();
+    try {
+      if (MediaQuery.sizeOf(context).width >= 700) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => Dialog(
+            backgroundColor: AlliamColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: content,
+            ),
+          ),
+        );
+      } else {
+        await showModalBottomSheet<void>(
+          context: context,
+          backgroundColor: AlliamColors.surface,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          builder: (context) => SafeArea(child: content),
+        );
+      }
+    } finally {
+      _suspendTypingFocus = false;
+    }
+    _restoreTypingFocus();
   }
 
   void _showAudioWarning(Object error) {
@@ -1409,6 +1948,317 @@ class _TrainingSessionPageState extends State<TrainingSessionPage> {
         ),
       );
   }
+}
+
+class _WordInfoButton extends StatelessWidget {
+  const _WordInfoButton({
+    required this.label,
+    required this.icon,
+    required this.available,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool available;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: available ? label : '$label unavailable',
+    child: Semantics(
+      button: true,
+      enabled: available,
+      label: label,
+      child: IconButton(
+        onPressed: available ? onPressed : null,
+        icon: Icon(icon),
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(46),
+          foregroundColor: AlliamColors.coral,
+          disabledForegroundColor: AlliamColors.muted.withValues(alpha: 0.45),
+          side: BorderSide(
+            color: available
+                ? AlliamColors.coral.withValues(alpha: 0.28)
+                : AlliamColors.muted.withValues(alpha: 0.18),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _AlliamKeyboard extends StatelessWidget {
+  const _AlliamKeyboard({
+    required this.enabled,
+    required this.canSubmit,
+    required this.actionLabel,
+    required this.onLetter,
+    required this.onBackspace,
+    required this.onSubmit,
+  });
+
+  final bool enabled;
+  final bool canSubmit;
+  final String actionLabel;
+  final ValueChanged<String> onLetter;
+  final VoidCallback onBackspace;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 900),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _letterRow('qwertyuiop'),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: _letterRow('asdfghjkl'),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 54),
+            child: Row(
+              children: [
+                for (final letter in 'zxcvbnm'.split('')) ...[
+                  Expanded(child: _letterKey(letter)),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: _KeyboardAction(
+                    tooltip: 'Backspace',
+                    onPressed: enabled ? onBackspace : null,
+                    child: const Icon(Icons.backspace_outlined, size: 20),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 2,
+                  child: _KeyboardAction(
+                    tooltip: 'Submit',
+                    onPressed: canSubmit ? onSubmit : null,
+                    primary: true,
+                    child: Text(
+                      actionLabel,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _letterRow(String letters) => Row(
+    children: [
+      for (var index = 0; index < letters.length; index++) ...[
+        Expanded(child: _letterKey(letters[index])),
+        if (index < letters.length - 1) const SizedBox(width: 6),
+      ],
+    ],
+  );
+
+  Widget _letterKey(String letter) => SizedBox(
+    height: 40,
+    child: FilledButton.tonal(
+      onPressed: enabled ? () => onLetter(letter) : null,
+      style: FilledButton.styleFrom(
+        padding: EdgeInsets.zero,
+        backgroundColor: AlliamColors.surfaceStrong,
+        foregroundColor: AlliamColors.text,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+      child: Text(
+        letter.toUpperCase(),
+        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+      ),
+    ),
+  );
+}
+
+class _KeyboardAction extends StatelessWidget {
+  const _KeyboardAction({
+    required this.tooltip,
+    required this.onPressed,
+    required this.child,
+    this.primary = false,
+  });
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Widget child;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: SizedBox(
+      height: 40,
+      child: FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          padding: EdgeInsets.zero,
+          backgroundColor: primary
+              ? AlliamColors.coral
+              : AlliamColors.surfaceStrong,
+          foregroundColor: primary ? Colors.white : AlliamColors.coral,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+          ),
+        ),
+        child: child,
+      ),
+    ),
+  );
+}
+
+class _RotatePhonePrompt extends StatefulWidget {
+  const _RotatePhonePrompt();
+
+  @override
+  State<_RotatePhonePrompt> createState() => _RotatePhonePromptState();
+}
+
+class _RotatePhonePromptState extends State<_RotatePhonePrompt>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlliamBackground(
+    child: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) => Transform.rotate(
+                  angle:
+                      Curves.easeInOutCubic.transform(_controller.value) *
+                      math.pi /
+                      2,
+                  child: child,
+                ),
+                child: Container(
+                  width: 76,
+                  height: 122,
+                  decoration: BoxDecoration(
+                    color: AlliamColors.surfaceStrong,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AlliamColors.coral, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AlliamColors.coral.withValues(alpha: 0.16),
+                        blurRadius: 28,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.screen_rotation_rounded,
+                      color: AlliamColors.coral,
+                      size: 34,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 42),
+              Text(
+                'Turning sideways',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: AlliamColors.coral,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                kIsWeb
+                    ? 'Rotate your phone to begin the spelling session.'
+                    : 'Your spelling session uses landscape so every word stays on one line.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _WrongEdgeFlash extends StatefulWidget {
+  const _WrongEdgeFlash({super.key});
+
+  @override
+  State<_WrongEdgeFlash> createState() => _WrongEdgeFlashState();
+}
+
+class _WrongEdgeFlashState extends State<_WrongEdgeFlash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 620),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    builder: (context, _) {
+      final pulse = math.sin(_controller.value * math.pi);
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: const Color(0xFFE23B32).withValues(alpha: pulse * 0.72),
+            width: 5 + pulse * 7,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFE23B32).withValues(alpha: pulse * 0.18),
+              blurRadius: 34,
+              spreadRadius: 10,
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class _AudioPreparationPanel extends StatelessWidget {
@@ -1857,11 +2707,12 @@ class _MilestonePayoff extends StatelessWidget {
     required this.accuracy,
     required this.correct,
     required this.attempted,
-    required this.scoreEarned,
+    required this.masteredThisSession,
+    required this.needsPracticeThisSession,
     required this.stageLabel,
     required this.stageProgress,
-    required this.stageSessions,
-    required this.stageRequired,
+    required this.masteredWords,
+    required this.masteryTarget,
     required this.promoted,
     required this.onAgain,
     required this.onLeave,
@@ -1873,11 +2724,12 @@ class _MilestonePayoff extends StatelessWidget {
   final int accuracy;
   final int correct;
   final int attempted;
-  final int scoreEarned;
+  final int masteredThisSession;
+  final int needsPracticeThisSession;
   final String stageLabel;
   final double stageProgress;
-  final int stageSessions;
-  final int stageRequired;
+  final int masteredWords;
+  final int masteryTarget;
   final bool promoted;
   final int? bestStreak;
   final VoidCallback onAgain;
@@ -1943,20 +2795,26 @@ class _MilestonePayoff extends StatelessWidget {
                 Text('Best streak $bestStreak'),
               ],
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 22,
+                runSpacing: 10,
                 children: [
-                  const Icon(
-                    Icons.add_circle_outline_rounded,
+                  _MasteryResult(
+                    icon: Icons.workspace_premium_outlined,
+                    value: '$masteredThisSession',
+                    label: masteredThisSession == 1
+                        ? 'word mastered'
+                        : 'words mastered',
                     color: AlliamColors.success,
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '$scoreEarned points',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AlliamColors.success,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  _MasteryResult(
+                    icon: Icons.replay_rounded,
+                    value: '$needsPracticeThisSession',
+                    label: needsPracticeThisSession == 1
+                        ? 'word to practise'
+                        : 'words to practise',
+                    color: AlliamColors.coral,
                   ),
                 ],
               ),
@@ -1968,7 +2826,7 @@ class _MilestonePayoff extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const Spacer(),
-                  Text('$stageSessions/$stageRequired sessions'),
+                  Text('$masteredWords/$masteryTarget words mastered'),
                 ],
               ),
               const SizedBox(height: 9),
@@ -2002,6 +2860,38 @@ class _MilestonePayoff extends StatelessWidget {
         ),
       ),
     ),
+  );
+}
+
+class _MasteryResult extends StatelessWidget {
+  const _MasteryResult({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, color: color),
+      const SizedBox(width: 7),
+      Text(
+        value,
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(width: 5),
+      Text(label),
+    ],
   );
 }
 

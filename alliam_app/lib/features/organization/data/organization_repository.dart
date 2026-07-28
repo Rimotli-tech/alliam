@@ -51,41 +51,56 @@ class OrganizationRepository {
   }) async {
     final organization = firestore.doc('organizations/$organizationId');
     final member = organization.collection('members').doc(user.uid);
-    final organizationSnapshot = await organization.get();
-    if (!organizationSnapshot.exists) {
-      await organization.set({
-        'id': organizationId,
-        'name': name,
-        'country': country,
-        'ownerUid': user.uid,
-        'status': 'active',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    } else {
-      await organization.set({
-        'name': name,
-        'country': country,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
-    if (!(await member.get()).exists) {
-      await member.set({
-        'uid': user.uid,
-        'email': user.email,
-        'displayName': user.displayName ?? name,
-        'role': 'owner',
-        'permissions': {
-          'manageLearners': true,
-          'manageTeams': true,
-          'manageCompetitions': true,
-          'manageMembers': true,
-          'manageOrganization': true,
+    // Do not read first: a partially created organization has no record yet,
+    // and security rules intentionally deny reads of a missing private record.
+    // These merge writes make setup safe to resume after closing the browser.
+    await organization.set({
+      'id': organizationId,
+      'name': name,
+      'country': country,
+      'ownerUid': user.uid,
+      'status': 'active',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await member.set({
+      'uid': user.uid,
+      'email': user.email,
+      'displayName': user.displayName ?? name,
+      'role': 'owner',
+      'permissions': {
+        'manageLearners': true,
+        'manageTeams': true,
+        'manageCompetitions': true,
+        'manageMembers': true,
+        'manageOrganization': true,
+      },
+      'status': 'active',
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> syncAccountLearners({
+    required String organizationId,
+    required String accountId,
+    required List<Map<String, dynamic>> learners,
+  }) async {
+    if (learners.isEmpty) return;
+    final batch = firestore.batch();
+    for (final learner in learners) {
+      final learnerId = learner['id']?.toString();
+      if (learnerId == null || learnerId.isEmpty) continue;
+      batch.set(
+        firestore.doc('organizations/$organizationId/learners/$learnerId'),
+        {
+          ...learner,
+          'sourceAccountId': accountId,
+          'sourceLearnerId': learnerId,
+          'status': 'active',
+          'updatedAt': FieldValue.serverTimestamp(),
         },
-        'status': 'active',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+        SetOptions(merge: true),
+      );
     }
+    await batch.commit();
   }
 }
